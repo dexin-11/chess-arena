@@ -123,6 +123,14 @@ export class Room {
           }
         }
         break;
+
+      case 'waitAck':
+        for (const [id, c] of this.connections) {
+          if (id !== wsId) {
+            this.sendMessage(c.ws, { type: 'waitAck' });
+          }
+        }
+        break;
     }
   }
 

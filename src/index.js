@@ -70,9 +70,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .btn-secondary:hover { background: #555; }
 .button-row { display: flex; gap: 12px; }
 
-.wait-notice-overlay { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #e94560; color: #fff; padding: 16px 32px; border-radius: 12px; font-size: 18px; font-weight: bold; box-shadow: 0 4px 20px rgba(233,69,96,0.5); z-index: 200; animation: slideDown 0.3s ease, fadeOut 0.5s ease 4.5s forwards; }
+.wait-notice-overlay { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #e94560; color: #fff; padding: 16px 32px; border-radius: 12px; font-size: 18px; font-weight: bold; box-shadow: 0 4px 20px rgba(233,69,96,0.5); z-index: 200; animation: slideDown 0.3s ease; }
+.wait-notice-overlay .ack-btn { margin-left: 16px; background: #fff; color: #e94560; border: none; padding: 6px 16px; border-radius: 6px; font-weight: bold; cursor: pointer; }
 @keyframes slideDown { from { transform: translate(-50%, -100px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
-@keyframes fadeOut { to { opacity: 0; transform: translate(-50%, -20px); } }
 
 @media (max-width: 540px) {
   .cell { width: 24px; height: 24px; }
@@ -357,6 +357,10 @@ function connect() {
       case 'waitNotice':
         showWaitNotice('对方说：请等我一会');
         break;
+
+      case 'waitAck':
+        waitAckReceived = true;
+        break;
     }
   };
 
@@ -403,39 +407,52 @@ function cancelRematch() {
   }
 }
 
+var waitAckReceived = false;
+
 function sendWaitNotice() {
   if (ws && ws.readyState === 1) {
     ws.send(JSON.stringify({ type: 'waitNotice' }));
-    document.getElementById('waitBtn').textContent = '已通知';
-    setTimeout(() => {
-      document.getElementById('waitBtn').textContent = '等一会';
-    }, 2000);
+    waitAckReceived = false;
+    var btn = document.getElementById('waitBtn');
+    btn.textContent = '等待对方确认...';
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+    btn.style.cursor = 'not-allowed';
+    var checkAck = setInterval(function() {
+      if (waitAckReceived) {
+        clearInterval(checkAck);
+        btn.textContent = '已收到';
+        setTimeout(function() {
+          btn.textContent = '等一会';
+          btn.disabled = false;
+          btn.style.opacity = '';
+          btn.style.cursor = '';
+        }, 1500);
+      }
+    }, 200);
   }
 }
 
 function showWaitNotice(text) {
-  // 页内横幅通知
   var existing = document.getElementById('waitNoticeOverlay');
   if (existing) existing.remove();
   var el = document.createElement('div');
   el.id = 'waitNoticeOverlay';
   el.className = 'wait-notice-overlay';
-  el.textContent = text;
-  document.body.appendChild(el);
-  setTimeout(function() { if (el.parentNode) el.remove(); }, 5000);
-
-  // 浏览器系统通知
-  if ('Notification' in window) {
-    if (Notification.permission === 'granted') {
-      new Notification('五子棋对战', { body: text });
-    } else if (Notification.permission !== 'denied') {
-      Notification.requestPermission().then(function(p) {
-        if (p === 'granted') {
-          new Notification('五子棋对战', { body: text });
-        }
-      });
+  var span = document.createElement('span');
+  span.textContent = text;
+  var btn = document.createElement('button');
+  btn.className = 'ack-btn';
+  btn.textContent = '收到';
+  btn.onclick = function() {
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: 'waitAck' }));
     }
-  }
+    el.remove();
+  };
+  el.appendChild(span);
+  el.appendChild(btn);
+  document.body.appendChild(el);
 }
 
 function copyLink() {
