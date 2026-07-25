@@ -437,7 +437,10 @@ export default {
     }
 
     return new Response(INDEX_HTML, {
-      headers: { 'Content-Type': 'text/html;charset=utf-8' },
+      headers: {
+        'Content-Type': 'text/html;charset=utf-8',
+        'Cache-Control': 'public, max-age=3600, s-maxage=86400',
+      },
     });
   },
 };
