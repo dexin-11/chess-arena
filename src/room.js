@@ -10,47 +10,35 @@ export class Room {
     this.blackPlayer = null;
     this.whitePlayer = null;
     this.nextId = 0;
-    this.rematchVotes = new Set(); // wsId 集合
+    this.rematchVotes = new Set();
   }
 
+  // 处理 WebSocket 升级请求
   async fetch(request) {
     if (request.headers.get('Upgrade') !== 'websocket') {
       return new Response('Expected WebSocket', { status: 426 });
     }
 
-    if (this.connections.size >= 2) {
-      const pair = new WebSocketPair();
-      const [client, server] = [pair[0], pair[1]];
-      server.accept();
-      server.send(JSON.stringify({ type: 'roomFull' }));
-      server.close(4001, 'Room is full');
-      return new Response(null, { status: 101, webSocket: client });
-    }
-
+    // 使用 Hibernation API：让 DO 在空闲时可休眠，减少唤醒延迟
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
-    this.acceptWebSocket(server);
+    await this.state.acceptWebSocket(server);
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  acceptWebSocket(ws) {
-    // 关键：必须调用 accept() 才能发送和接收消息
+  // WebSocket Hibernation API：连接建立时调用
+  async webSocketConnect(ws) {
     ws.accept();
+
+    if (this.connections.size >= 2) {
+      ws.send(JSON.stringify({ type: 'roomFull' }));
+      ws.close(4001, 'Room is full');
+      return;
+    }
 
     const wsId = this.nextId++;
     this.connections.set(wsId, { ws, color: null, latency: 0, online: true });
-
-    ws.addEventListener('message', (event) => {
-      this.handleMessage(wsId, event.data);
-    });
-
-    ws.addEventListener('close', () => {
-      this.handleClose(wsId);
-    });
-
-    ws.addEventListener('error', () => {
-      this.handleClose(wsId);
-    });
+    ws.serializeAttachment({ wsId });
 
     // 第二个玩家加入时分配颜色
     if (this.connections.size === 2 && !this.blackPlayer) {
@@ -58,32 +46,15 @@ export class Room {
     }
   }
 
-  assignColors() {
-    const ids = [...this.connections.keys()];
-    const blackIdx = Math.random() < 0.5 ? 0 : 1;
-    const blackId = ids[blackIdx];
-    const whiteId = ids[1 - blackIdx];
+  // WebSocket Hibernation API：收到消息时调用
+  async webSocketMessage(ws, message) {
+    const attachment = ws.deserializeAttachment();
+    if (!attachment) return;
+    const wsId = attachment.wsId;
 
-    this.blackPlayer = blackId;
-    this.whitePlayer = whiteId;
-
-    for (const [id, conn] of this.connections) {
-      conn.color = id === blackId ? 'black' : 'white';
-      this.sendMessage(conn.ws, {
-        type: 'colorAssign',
-        you: conn.color,
-        opponent: id === blackId ? 'white' : 'black',
-      });
-    }
-
-    this.broadcastSync();
-    this.broadcastStatus();
-  }
-
-  handleMessage(wsId, raw) {
     let msg;
     try {
-      msg = JSON.parse(raw);
+      msg = JSON.parse(message);
     } catch {
       return;
     }
@@ -93,7 +64,7 @@ export class Room {
 
     switch (msg.type) {
       case 'ping':
-        this.sendMessage(conn.ws, { type: 'pong', ts: msg.ts });
+        this.sendMessage(ws, { type: 'pong', ts: msg.ts || Date.now() });
         break;
 
       case 'latency':
@@ -118,6 +89,42 @@ export class Room {
         this.handleRematchDecline(wsId);
         break;
     }
+  }
+
+  // WebSocket Hibernation API：连接关闭时调用
+  async webSocketClose(ws, code, reason) {
+    const attachment = ws.deserializeAttachment();
+    if (!attachment) return;
+    this.handleClose(attachment.wsId);
+  }
+
+  // WebSocket Hibernation API：连接出错时调用
+  async webSocketError(ws, error) {
+    const attachment = ws.deserializeAttachment();
+    if (!attachment) return;
+    this.handleClose(attachment.wsId);
+  }
+
+  assignColors() {
+    const ids = [...this.connections.keys()];
+    const blackIdx = Math.random() < 0.5 ? 0 : 1;
+    const blackId = ids[blackIdx];
+    const whiteId = ids[1 - blackIdx];
+
+    this.blackPlayer = blackId;
+    this.whitePlayer = whiteId;
+
+    for (const [id, conn] of this.connections) {
+      conn.color = id === blackId ? 'black' : 'white';
+      this.sendMessage(conn.ws, {
+        type: 'colorAssign',
+        you: conn.color,
+        opponent: id === blackId ? 'white' : 'black',
+      });
+    }
+
+    this.broadcastSync();
+    this.broadcastStatus();
   }
 
   handleMove(wsId, msg) {

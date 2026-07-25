@@ -428,7 +428,8 @@ export default {
         return new Response('Missing room parameter', { status: 400 });
       }
       const id = env.ROOM.idFromName(roomId);
-      const stub = env.ROOM.get(id);
+      // locationHint: apac 让 DO 创建在亚太节点，减少中国用户延迟
+      const stub = env.ROOM.get(id, { locationHint: 'apac' });
       return stub.fetch(request);
     }
 
