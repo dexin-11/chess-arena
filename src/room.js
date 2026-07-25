@@ -52,8 +52,9 @@ export class Room {
     });
 
     // If this is the second player, assign colors
+    // Use setTimeout to ensure both WebSockets are fully open before sending messages
     if (this.connections.size === 2 && !this.blackPlayer) {
-      this.assignColors();
+      setTimeout(() => this.assignColors(), 0);
     }
   }
 
