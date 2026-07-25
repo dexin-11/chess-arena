@@ -175,18 +175,6 @@ export class Room {
         else this.handleMove(wsId, msg);
         break;
 
-      case 'getMoves':
-        // 国际象棋：返回选中棋子的合法走法，供客户端高亮
-        if (this.gameType === 'chess' && this.chessBoard) {
-          const f = msg.from;
-          if (f && Number.isInteger(f.r) && Number.isInteger(f.c) &&
-              f.r >= 0 && f.r < 8 && f.c >= 0 && f.c < 8) {
-            const moves = Chess.getLegalMoves(this.chessBoard, f.r, f.c, this.chessState);
-            this.sendMessage(conn.ws, { type: 'legalMoves', from: { r: f.r, c: f.c }, moves });
-          }
-        }
-        break;
-
       case 'rematchRequest':
         this.handleRematchRequest(wsId, msg);
         break;
@@ -464,6 +452,8 @@ export class Room {
     };
     if (this.gameType === 'chess') {
       payload.lastMove = this.lastMove;
+      // 把规则状态一并下发，供客户端本地计算合法走法（避免每次选中棋子都 RTT）
+      payload.chessState = this.chessState;
     }
     this.broadcast(payload);
   }

@@ -262,6 +262,269 @@ body {
 </div>
 
 <script>
+// === 国际象棋规则引擎（前端本地版，与 src/chess.js 同源） ===
+// 选中棋子时本地计算合法走法，避免每次都向服务端 RTT。
+const Chess = (function() {
+  const ROOK_DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+  const BISHOP_DIRS = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+  const KING_DIRS = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
+  const KNIGHT_DELTAS = [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]];
+  const ROOK_ORIGINS = {
+    white: { '7,0': 'q', '7,7': 'k' },
+    black: { '0,0': 'q', '0,7': 'k' },
+  };
+  const inBounds = (r, c) => r >= 0 && r < 8 && c >= 0 && c < 8;
+  const opposite = (color) => (color === 'white' ? 'black' : 'white');
+
+  function cloneBoard(board) {
+    return board.map((row) => row.map((cell) => (cell ? { type: cell.type, color: cell.color } : null)));
+  }
+
+  function isSquareAttacked(board, r, c, byColor) {
+    const pawnRow = byColor === 'white' ? r + 1 : r - 1;
+    if (inBounds(pawnRow, c - 1)) {
+      const p = board[pawnRow][c - 1];
+      if (p && p.color === byColor && p.type === 'p') return true;
+    }
+    if (inBounds(pawnRow, c + 1)) {
+      const p = board[pawnRow][c + 1];
+      if (p && p.color === byColor && p.type === 'p') return true;
+    }
+    for (const [dr, dc] of KNIGHT_DELTAS) {
+      const nr = r + dr, nc = c + dc;
+      if (inBounds(nr, nc)) {
+        const p = board[nr][nc];
+        if (p && p.color === byColor && p.type === 'n') return true;
+      }
+    }
+    for (const [dr, dc] of KING_DIRS) {
+      const nr = r + dr, nc = c + dc;
+      if (inBounds(nr, nc)) {
+        const p = board[nr][nc];
+        if (p && p.color === byColor && p.type === 'k') return true;
+      }
+    }
+    for (const [dr, dc] of ROOK_DIRS) {
+      let nr = r + dr, nc = c + dc;
+      while (inBounds(nr, nc)) {
+        const p = board[nr][nc];
+        if (p) {
+          if (p.color === byColor && (p.type === 'r' || p.type === 'q')) return true;
+          break;
+        }
+        nr += dr; nc += dc;
+      }
+    }
+    for (const [dr, dc] of BISHOP_DIRS) {
+      let nr = r + dr, nc = c + dc;
+      while (inBounds(nr, nc)) {
+        const p = board[nr][nc];
+        if (p) {
+          if (p.color === byColor && (p.type === 'b' || p.type === 'q')) return true;
+          break;
+        }
+        nr += dr; nc += dc;
+      }
+    }
+    return false;
+  }
+
+  function findKing(board, color) {
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const p = board[r][c];
+        if (p && p.type === 'k' && p.color === color) return { r, c };
+      }
+    }
+    return null;
+  }
+
+  function isInCheck(board, color) {
+    const king = findKing(board, color);
+    if (!king) return false;
+    return isSquareAttacked(board, king.r, king.c, opposite(color));
+  }
+
+  function getPseudoLegalMoves(board, r, c, state) {
+    const piece = board[r][c];
+    if (!piece) return [];
+    const color = piece.color;
+    const opponent = opposite(color);
+    const moves = [];
+    const add = (tr, tc, special) => {
+      if (!inBounds(tr, tc)) return;
+      const target = board[tr][tc];
+      if (target && target.color === color) return;
+      const move = { from: { r, c }, to: { r: tr, c: tc } };
+      if (special) move.special = special;
+      moves.push(move);
+    };
+    switch (piece.type) {
+      case 'p': {
+        const dir = color === 'white' ? -1 : 1;
+        const startRow = color === 'white' ? 6 : 1;
+        const lastRow = color === 'white' ? 0 : 7;
+        const fr = r + dir;
+        if (inBounds(fr, c) && !board[fr][c]) {
+          if (fr === lastRow) add(fr, c, 'promotion');
+          else add(fr, c);
+          const fr2 = r + 2 * dir;
+          if (r === startRow && inBounds(fr2, c) && !board[fr2][c]) add(fr2, c);
+        }
+        for (const dc of [-1, 1]) {
+          const tr = r + dir, tc = c + dc;
+          if (!inBounds(tr, tc)) continue;
+          const target = board[tr][tc];
+          if (target && target.color === opponent) {
+            if (tr === lastRow) add(tr, tc, 'promotion');
+            else add(tr, tc);
+          } else if (state && state.enPassantTarget &&
+                     state.enPassantTarget.r === tr && state.enPassantTarget.c === tc) {
+            add(tr, tc, 'enpassant');
+          }
+        }
+        break;
+      }
+      case 'n': {
+        for (const [dr, dc] of KNIGHT_DELTAS) add(r + dr, c + dc);
+        break;
+      }
+      case 'k': {
+        for (const [dr, dc] of KING_DIRS) add(r + dr, c + dc);
+        if (state && state.castlingRights && state.castlingRights[color]) {
+          const rights = state.castlingRights[color];
+          const kingRow = color === 'white' ? 7 : 0;
+          if (r === kingRow && c === 4 && !isSquareAttacked(board, kingRow, 4, opponent)) {
+            if (rights.k && !board[kingRow][5] && !board[kingRow][6] &&
+                board[kingRow][7] && board[kingRow][7].type === 'r' && board[kingRow][7].color === color &&
+                !isSquareAttacked(board, kingRow, 5, opponent) &&
+                !isSquareAttacked(board, kingRow, 6, opponent)) {
+              moves.push({ from: { r, c }, to: { r: kingRow, c: 6 }, special: 'castle-kingside' });
+            }
+            if (rights.q && !board[kingRow][1] && !board[kingRow][2] && !board[kingRow][3] &&
+                board[kingRow][0] && board[kingRow][0].type === 'r' && board[kingRow][0].color === color &&
+                !isSquareAttacked(board, kingRow, 3, opponent) &&
+                !isSquareAttacked(board, kingRow, 2, opponent)) {
+              moves.push({ from: { r, c }, to: { r: kingRow, c: 2 }, special: 'castle-queenside' });
+            }
+          }
+        }
+        break;
+      }
+      case 'b':
+      case 'r':
+      case 'q': {
+        let dirs = [];
+        if (piece.type === 'b' || piece.type === 'q') dirs = dirs.concat(BISHOP_DIRS);
+        if (piece.type === 'r' || piece.type === 'q') dirs = dirs.concat(ROOK_DIRS);
+        for (const [dr, dc] of dirs) {
+          let nr = r + dr, nc = c + dc;
+          while (inBounds(nr, nc)) {
+            const target = board[nr][nc];
+            if (target) {
+              if (target.color !== color) moves.push({ from: { r, c }, to: { r: nr, c: nc } });
+              break;
+            }
+            moves.push({ from: { r, c }, to: { r: nr, c: nc } });
+            nr += dr; nc += dc;
+          }
+        }
+        break;
+      }
+    }
+    return moves;
+  }
+
+  function applyMove(board, move, state, promotionPiece) {
+    const newBoard = cloneBoard(board);
+    const piece = newBoard[move.from.r][move.from.c];
+    const color = piece.color;
+    const opponent = opposite(color);
+    let captured = null;
+    let isPromotion = false;
+    const newCastlingRights = state && state.castlingRights
+      ? {
+          white: { k: state.castlingRights.white.k, q: state.castlingRights.white.q },
+          black: { k: state.castlingRights.black.k, q: state.castlingRights.black.q },
+        }
+      : { white: { k: false, q: false }, black: { k: false, q: false } };
+    let newEnPassantTarget = null;
+    if (move.special === 'enpassant') {
+      captured = newBoard[move.from.r][move.to.c];
+      newBoard[move.from.r][move.to.c] = null;
+    } else if (newBoard[move.to.r][move.to.c]) {
+      captured = newBoard[move.to.r][move.to.c];
+    }
+    newBoard[move.to.r][move.to.c] = piece;
+    newBoard[move.from.r][move.from.c] = null;
+    if (move.special === 'castle-kingside') {
+      const row = move.from.r;
+      newBoard[row][5] = newBoard[row][7];
+      newBoard[row][7] = null;
+    } else if (move.special === 'castle-queenside') {
+      const row = move.from.r;
+      newBoard[row][3] = newBoard[row][0];
+      newBoard[row][0] = null;
+    }
+    if (piece.type === 'p') {
+      const lastRow = color === 'white' ? 0 : 7;
+      if (move.to.r === lastRow) {
+        newBoard[move.to.r][move.to.c] = { type: promotionPiece || 'q', color };
+        isPromotion = true;
+      }
+      const startRow = color === 'white' ? 6 : 1;
+      if (move.from.r === startRow && Math.abs(move.to.r - move.from.r) === 2) {
+        newEnPassantTarget = { r: (move.from.r + move.to.r) / 2, c: move.from.c };
+      }
+    }
+    if (piece.type === 'k') {
+      newCastlingRights[color].k = false;
+      newCastlingRights[color].q = false;
+    }
+    const fromKey = move.from.r + ',' + move.from.c;
+    if (piece.type === 'r' && ROOK_ORIGINS[color][fromKey]) {
+      newCastlingRights[color][ROOK_ORIGINS[color][fromKey]] = false;
+    }
+    if (captured && captured.type === 'r') {
+      const toKey = move.to.r + ',' + move.to.c;
+      if (ROOK_ORIGINS[opponent][toKey]) {
+        newCastlingRights[opponent][ROOK_ORIGINS[opponent][toKey]] = false;
+      }
+    }
+    return {
+      board: newBoard,
+      newState: { castlingRights: newCastlingRights, enPassantTarget: newEnPassantTarget },
+      captured,
+      isPromotion,
+    };
+  }
+
+  function getLegalMoves(board, r, c, state) {
+    const piece = board[r][c];
+    if (!piece) return [];
+    const color = piece.color;
+    const opponent = opposite(color);
+    const pseudo = getPseudoLegalMoves(board, r, c, state);
+    const legal = [];
+    for (const move of pseudo) {
+      if (move.special === 'castle-kingside' || move.special === 'castle-queenside') {
+        const row = move.from.r;
+        const startC = 4;
+        const midC = move.special === 'castle-kingside' ? 5 : 3;
+        const endC = move.special === 'castle-kingside' ? 6 : 2;
+        if (isSquareAttacked(board, row, startC, opponent)) continue;
+        if (isSquareAttacked(board, row, midC, opponent)) continue;
+        if (isSquareAttacked(board, row, endC, opponent)) continue;
+      }
+      const { board: next } = applyMove(board, move, state);
+      if (!isInCheck(next, color)) legal.push(move);
+    }
+    return legal;
+  }
+
+  return { getLegalMoves };
+})();
+
 const ROWS = 15, COLS = 15;
 const CHESS_GLYPHS = {
   white: { k:'\\u2654', q:'\\u2655', r:'\\u2656', b:'\\u2657', n:'\\u2658', p:'\\u2659' },
@@ -277,6 +540,7 @@ let ws = null;
 let roomId = '';
 let boardData = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
 let chessBoardData = null;
+let chessState = null;       // 与服务端同步的规则状态（易位权、过路兵目标）
 let chessSelected = null;
 let chessLegalMoves = [];
 let chessFlipped = false;
@@ -483,11 +747,13 @@ function onChessCellClick(r, c) {
   // 选中己方棋子
   if (piece && piece.color === myColor) {
     chessSelected = { r, c };
-    chessLegalMoves = [];
-    renderChess();
-    if (ws && ws.readyState === 1) {
-      ws.send(JSON.stringify({ type: 'getMoves', from: { r: r, c: c } }));
+    // 本地直接计算合法走法，避免往返 RTT 造成"卡顿感"
+    try {
+      chessLegalMoves = chessState ? Chess.getLegalMoves(chessBoardData, r, c, chessState) : [];
+    } catch {
+      chessLegalMoves = [];
     }
+    renderChess();
   } else {
     // 点击空格或对方棋子（非目标）→ 取消选中
     chessSelected = null;
@@ -614,6 +880,7 @@ function connect() {
         chessFlipped = (gameType === 'chess' && myColor === 'black');
         chessSelected = null;
         chessLegalMoves = [];
+        chessState = null;
         checkColor = null;
         rematchRole = null;
         gameOver = false;
@@ -632,6 +899,11 @@ function connect() {
         if (gameType === 'chess') {
           chessBoardData = msg.board;
           lastMove = msg.lastMove || null;
+          // 同步规则状态：服务端权威，前端用于本地计算合法走法
+          chessState = msg.chessState || null;
+          // 棋盘已变，原选中与走法作废（除非用户刚刚又点了同一棋子，那会在点击处理里重置）
+          chessSelected = null;
+          chessLegalMoves = [];
         } else {
           boardData = msg.board;
         }
@@ -672,13 +944,6 @@ function connect() {
         checkColor = msg.color;
         renderBoard();
         setStatus('将军！', true);
-        break;
-
-      case 'legalMoves':
-        if (chessSelected && msg.from && msg.from.r === chessSelected.r && msg.from.c === chessSelected.c) {
-          chessLegalMoves = msg.moves || [];
-          renderChess();
-        }
         break;
 
       case 'rematchRequest':
