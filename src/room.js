@@ -3,7 +3,7 @@ export class Room {
     this.state = state;
     this.env = env;
     this.board = Array.from({ length: 15 }, () => Array(15).fill(null));
-    this.connections = new Map(); // wsId -> { ws, color, latency, online }
+    this.connections = new Map(); // wsId -> { ws, color, latency, online, ready }
     this.currentTurn = 'black';
     this.gameOver = false;
     this.winner = null;
@@ -11,7 +11,6 @@ export class Room {
     this.whitePlayer = null;
     this.nextId = 0;
     this.pingInterval = null;
-    this.offlineTimer = new Map(); // wsId -> timer
   }
 
   async fetch(request) {
@@ -38,7 +37,22 @@ export class Room {
 
   acceptWebSocket(ws) {
     const wsId = this.nextId++;
-    this.connections.set(wsId, { ws, color: null, latency: 0, online: false });
+    this.connections.set(wsId, { ws, color: null, latency: 0, online: false, ready: false });
+
+    ws.addEventListener('open', () => {
+      const conn = this.connections.get(wsId);
+      if (!conn) return;
+      conn.ready = true;
+      conn.online = true;
+
+      // If this is the second player and both are ready, assign colors
+      if (this.connections.size === 2 && !this.blackPlayer) {
+        const allReady = [...this.connections.values()].every(c => c.ready);
+        if (allReady) {
+          this.assignColors();
+        }
+      }
+    });
 
     ws.addEventListener('message', (event) => {
       this.handleMessage(wsId, event.data);
@@ -55,21 +69,6 @@ export class Room {
     // Start ping interval if not already started
     if (!this.pingInterval) {
       this.pingInterval = setInterval(() => this.pingAll(), 3000);
-    }
-
-    // If this is the second player, try to assign colors
-    // Retry until both WebSockets are open
-    if (this.connections.size === 2 && !this.blackPlayer) {
-      this.tryAssignColors();
-    }
-  }
-
-  tryAssignColors() {
-    const allOpen = [...this.connections.values()].every(c => c.ws.readyState === 1);
-    if (allOpen) {
-      this.assignColors();
-    } else {
-      setTimeout(() => this.tryAssignColors(), 20);
     }
   }
 
@@ -117,16 +116,9 @@ export class Room {
 
     switch (msg.type) {
       case 'pong':
-        if (conn) {
-          conn.latency = Date.now() - msg.ts;
-          conn.online = true;
-          // Clear offline timer
-          if (this.offlineTimer.has(wsId)) {
-            clearTimeout(this.offlineTimer.get(wsId));
-            this.offlineTimer.delete(wsId);
-          }
-          this.broadcastStatus();
-        }
+        conn.latency = Date.now() - msg.ts;
+        conn.online = true;
+        this.broadcastStatus();
         break;
 
       case 'move':
@@ -197,10 +189,6 @@ export class Room {
     if (!conn) return;
 
     this.connections.delete(wsId);
-    if (this.offlineTimer.has(wsId)) {
-      clearTimeout(this.offlineTimer.get(wsId));
-      this.offlineTimer.delete(wsId);
-    }
 
     if (this.connections.size === 0) {
       if (this.pingInterval) {
