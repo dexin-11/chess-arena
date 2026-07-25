@@ -51,7 +51,39 @@ export class Room {
       this.handleClose(wsId);
     });
 
-    if (this.connections.size === 2 && !this.blackPlayer) {
+    if (this.blackPlayer !== null) {
+      // 游戏已开始，这是重连
+      const connectedColors = new Set();
+      for (const [, c] of this.connections) {
+        if (c.color) connectedColors.add(c.color);
+      }
+
+      let assignedColor = null;
+      if (!connectedColors.has('black')) assignedColor = 'black';
+      else if (!connectedColors.has('white')) assignedColor = 'white';
+
+      if (assignedColor) {
+        const conn = this.connections.get(wsId);
+        conn.color = assignedColor;
+        if (assignedColor === 'black') this.blackPlayer = wsId;
+        else this.whitePlayer = wsId;
+
+        this.sendMessage(conn.ws, {
+          type: 'colorAssign',
+          you: assignedColor,
+          opponent: assignedColor === 'black' ? 'white' : 'black',
+        });
+        this.broadcastSync();
+        this.broadcastStatus();
+
+        // 通知对方重连
+        for (const [id, c] of this.connections) {
+          if (id !== wsId) {
+            this.sendMessage(c.ws, { type: 'opponentRejoin' });
+          }
+        }
+      }
+    } else if (this.connections.size === 2) {
       this.assignColors();
     }
   }

@@ -351,7 +351,11 @@ function connect() {
         break;
 
       case 'opponentLeft':
-        setStatus('对手已断开');
+        setStatus('对手已断开，等待重连...');
+        break;
+
+      case 'opponentRejoin':
+        setStatus('');
         break;
 
       case 'waitNotice':
