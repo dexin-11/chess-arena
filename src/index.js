@@ -121,12 +121,13 @@ body {
 
 /* 国际象棋棋盘 */
 .chess-grid { width: 100%; height: 100%; display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); gap: 0; }
-.chess-cell { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: calc(var(--board-size) * 0.0975); cursor: pointer; position: relative; user-select: none; line-height: 1; }
+.chess-cell { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: calc(var(--board-size) * 0.108); cursor: pointer; position: relative; user-select: none; line-height: 1; }
 .chess-cell.light { background: #f0d9b5; }
 .chess-cell.dark { background: #b58863; }
-.chess-cell .piece { line-height: 1; pointer-events: none; }
-.chess-cell .piece.white { color: #fff; text-shadow: 0 0 2px #000, 1px 1px 1px #000, -1px -1px 1px #000; }
-.chess-cell .piece.black { color: #111; text-shadow: 0 0 1px #000; }
+.chess-cell .piece { line-height: 1; pointer-events: none; font-family: 'Noto Sans Symbols 2', 'Segoe UI Symbol', 'Apple Symbols', 'Noto Sans Symbols', 'DejaVu Sans', sans-serif; transition: transform 0.15s ease; will-change: transform; }
+.chess-cell .piece.white { color: #f8f6f0; text-shadow: -1px 0 0 #2a2a2a, 1px 0 0 #2a2a2a, 0 -1px 0 #2a2a2a, 0 1px 0 #2a2a2a, -1px -1px 0 #2a2a2a, 1px -1px 0 #2a2a2a, -1px 1px 0 #2a2a2a, 1px 1px 0 #2a2a2a, 0 2px 3px rgba(0,0,0,0.45); }
+.chess-cell .piece.black { color: #1a1a1a; text-shadow: 0 0 1px rgba(255,255,255,0.22), 0 2px 3px rgba(0,0,0,0.5); }
+.chess-cell.selected .piece { transform: translateY(-1px) scale(1.04); }
 .chess-cell.selected { box-shadow: inset 0 0 0 min(0.4vmin, 4px) var(--accent); }
 .chess-cell.last-move { box-shadow: inset 0 0 0 min(0.4vmin, 4px) rgba(255, 213, 79, 0.85); }
 .chess-cell.check-king { box-shadow: inset 0 0 0 min(0.4vmin, 4px) #ff3333; background: #ff6666 !important; }
@@ -527,7 +528,9 @@ const Chess = (function() {
 
 const ROWS = 15, COLS = 15;
 const CHESS_GLYPHS = {
-  white: { k:'\\u2654', q:'\\u2655', r:'\\u2656', b:'\\u2657', n:'\\u2658', p:'\\u2659' },
+  // 白黑双方统一使用实心字形（U+265A..F），靠 CSS 颜色与描边区分，
+  // 形状完全对称，避免空心字形在不同字体下细节缺失。
+  white: { k:'\\u265A', q:'\\u265B', r:'\\u265C', b:'\\u265D', n:'\\u265E', p:'\\u265F' },
   black: { k:'\\u265A', q:'\\u265B', r:'\\u265C', b:'\\u265D', n:'\\u265E', p:'\\u265F' }
 };
 
