@@ -3,13 +3,15 @@ export class Room {
     this.state = state;
     this.env = env;
     this.board = Array.from({ length: 15 }, () => Array(15).fill(null));
-    this.connections = new Map(); // wsId -> { ws, color }
+    this.connections = new Map(); // wsId -> { ws, color, latency, online }
     this.currentTurn = 'black';
     this.gameOver = false;
     this.winner = null;
     this.blackPlayer = null;
     this.whitePlayer = null;
     this.nextId = 0;
+    this.pingInterval = null;
+    this.offlineTimer = new Map(); // wsId -> timer
   }
 
   async fetch(request) {
@@ -21,7 +23,6 @@ export class Room {
       const pair = new WebSocketPair();
       const [client, server] = [pair[0], pair[1]];
       this.acceptWebSocket(server);
-      // Send room full message after accept
       setTimeout(() => {
         this.sendMessage(server, { type: 'roomFull' });
         server.close(4001, 'Room is full');
@@ -37,7 +38,7 @@ export class Room {
 
   acceptWebSocket(ws) {
     const wsId = this.nextId++;
-    this.connections.set(wsId, { ws, color: null });
+    this.connections.set(wsId, { ws, color: null, latency: 0, online: false });
 
     ws.addEventListener('message', (event) => {
       this.handleMessage(wsId, event.data);
@@ -51,10 +52,33 @@ export class Room {
       this.handleClose(wsId);
     });
 
-    // If this is the second player, assign colors
-    // Use setTimeout to ensure both WebSockets are fully open before sending messages
+    // Start ping interval if not already started
+    if (!this.pingInterval) {
+      this.pingInterval = setInterval(() => this.pingAll(), 3000);
+    }
+
+    // If this is the second player, try to assign colors
+    // Retry until both WebSockets are open
     if (this.connections.size === 2 && !this.blackPlayer) {
-      setTimeout(() => this.assignColors(), 0);
+      this.tryAssignColors();
+    }
+  }
+
+  tryAssignColors() {
+    const allOpen = [...this.connections.values()].every(c => c.ws.readyState === 1);
+    if (allOpen) {
+      this.assignColors();
+    } else {
+      setTimeout(() => this.tryAssignColors(), 20);
+    }
+  }
+
+  pingAll() {
+    const now = Date.now();
+    for (const [id, conn] of this.connections) {
+      if (conn.ws.readyState === 1) {
+        this.sendMessage(conn.ws, { type: 'ping', ts: now });
+      }
     }
   }
 
@@ -77,6 +101,7 @@ export class Room {
     }
 
     this.broadcastSync();
+    this.broadcastStatus();
   }
 
   handleMessage(wsId, raw) {
@@ -88,10 +113,26 @@ export class Room {
     }
 
     const conn = this.connections.get(wsId);
-    if (!conn || !conn.color) return;
+    if (!conn) return;
 
-    if (msg.type === 'move') {
-      this.handleMove(wsId, msg);
+    switch (msg.type) {
+      case 'pong':
+        if (conn) {
+          conn.latency = Date.now() - msg.ts;
+          conn.online = true;
+          // Clear offline timer
+          if (this.offlineTimer.has(wsId)) {
+            clearTimeout(this.offlineTimer.get(wsId));
+            this.offlineTimer.delete(wsId);
+          }
+          this.broadcastStatus();
+        }
+        break;
+
+      case 'move':
+        if (!conn.color) return;
+        this.handleMove(wsId, msg);
+        break;
     }
   }
 
@@ -120,10 +161,10 @@ export class Room {
 
   checkWin(row, col, color) {
     const directions = [
-      [1, 0],  // horizontal
-      [0, 1],  // vertical
-      [1, 1],  // diagonal
-      [1, -1], // anti-diagonal
+      [1, 0],
+      [0, 1],
+      [1, 1],
+      [1, -1],
     ];
 
     for (const [dr, dc] of directions) {
@@ -156,8 +197,16 @@ export class Room {
     if (!conn) return;
 
     this.connections.delete(wsId);
+    if (this.offlineTimer.has(wsId)) {
+      clearTimeout(this.offlineTimer.get(wsId));
+      this.offlineTimer.delete(wsId);
+    }
 
     if (this.connections.size === 0) {
+      if (this.pingInterval) {
+        clearInterval(this.pingInterval);
+        this.pingInterval = null;
+      }
       this.state.abort();
       return;
     }
@@ -166,6 +215,8 @@ export class Room {
     for (const [, c] of this.connections) {
       this.sendMessage(c.ws, { type: 'opponentLeft' });
     }
+
+    this.broadcastStatus();
   }
 
   broadcastSync() {
@@ -176,6 +227,19 @@ export class Room {
       gameOver: this.gameOver,
       winner: this.winner,
     });
+  }
+
+  broadcastStatus() {
+    const status = {};
+    for (const [, conn] of this.connections) {
+      if (conn.color) {
+        status[conn.color] = {
+          latency: conn.latency,
+          online: conn.online,
+        };
+      }
+    }
+    this.broadcast({ type: 'status', players: status });
   }
 
   broadcast(msg) {

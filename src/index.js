@@ -12,11 +12,20 @@ const INDEX_HTML = `<!DOCTYPE html>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
 
-.header { width: 100%; max-width: 600px; padding: 12px 16px; background: #16213e; border-bottom: 1px solid #0f3460; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.header { width: 100%; max-width: 600px; padding: 12px 16px; background: #16213e; border-bottom: 1px solid #0f3460; display: flex; flex-direction: column; gap: 6px; }
+.header-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
 .header-item { font-size: 14px; }
 .header-item span { font-weight: bold; }
 .color-black { color: #fff; text-shadow: 0 0 4px #000; }
 .color-white { color: #ddd; text-shadow: 0 0 4px #888; }
+
+.player-status { display: flex; gap: 16px; font-size: 12px; color: #aaa; }
+.player-status .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+.status-dot.online { background: #4ecca3; }
+.status-dot.offline { background: #e94560; }
+.latency-good { color: #4ecca3; }
+.latency-ok { color: #f0a500; }
+.latency-bad { color: #e94560; }
 
 .board-container { padding: 16px; display: flex; flex-direction: column; align-items: center; gap: 12px; flex: 1; }
 
@@ -64,9 +73,15 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 <body>
 
 <div class="header">
-  <div class="header-item">房间: <span id="roomId">—</span></div>
-  <div class="header-item">你: <span id="myColor">—</span></div>
-  <div class="header-item">回合: <span id="turnInfo">—</span></div>
+  <div class="header-row">
+    <div class="header-item">房间: <span id="roomId">—</span></div>
+    <div class="header-item">你: <span id="myColor">—</span></div>
+    <div class="header-item">回合: <span id="turnInfo">—</span></div>
+  </div>
+  <div class="player-status" id="playerStatus" style="display:none">
+    <span>黑棋: <span class="status-dot offline" id="blackDot"></span><span id="blackLatency">—</span></span>
+    <span>白棋: <span class="status-dot offline" id="whiteDot"></span><span id="whiteLatency">—</span></span>
+  </div>
 </div>
 
 <div class="board-container">
@@ -188,6 +203,26 @@ function updateHeader() {
   turnEl.textContent = gameOver ? '已结束' : (currentTurn === 'black' ? '黑棋' : '白棋');
 }
 
+function updateStatus(msg) {
+  document.getElementById('playerStatus').style.display = 'flex';
+  var players = msg.players;
+  ['black', 'white'].forEach(function(color) {
+    var dot = document.getElementById(color + 'Dot');
+    var latEl = document.getElementById(color + 'Latency');
+    var p = players[color];
+    if (p) {
+      dot.className = 'status-dot ' + (p.online ? 'online' : 'offline');
+      var lat = p.latency;
+      latEl.textContent = lat > 0 ? lat + 'ms' : '—';
+      latEl.className = lat < 100 ? 'latency-good' : (lat < 300 ? 'latency-ok' : 'latency-bad');
+    } else {
+      dot.className = 'status-dot offline';
+      latEl.textContent = '—';
+      latEl.className = '';
+    }
+  });
+}
+
 function setStatus(msg) {
   document.getElementById('statusMsg').textContent = msg;
 }
@@ -203,13 +238,12 @@ function connect() {
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
     switch (msg.type) {
-      case 'init':
-        myColor = msg.color;
-        if (!myColor) {
-          document.getElementById('waitingOverlay').classList.remove('hidden');
-          setStatus('等待第二位玩家加入...');
-        }
-        updateHeader();
+      case 'ping':
+        ws.send(JSON.stringify({ type: 'pong', ts: msg.ts }));
+        break;
+
+      case 'status':
+        updateStatus(msg);
         break;
 
       case 'colorAssign':
