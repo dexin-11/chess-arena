@@ -3,29 +3,22 @@ export class Room {
     this.state = state;
     this.env = env;
     this.board = Array.from({ length: 15 }, () => Array(15).fill(null));
+    this.connections = new Map(); // wsId -> { ws, color, latency, online }
     this.currentTurn = 'black';
     this.gameOver = false;
     this.winner = null;
     this.blackPlayer = null;
     this.whitePlayer = null;
+    this.nextId = 0;
     this.rematchVotes = new Set();
-    // Hibernation 模式下不用实例变量存连接，改用 state.getWebSockets()
   }
 
-  // 获取所有活跃 WebSocket 连接
-  getConnections() {
-    return this.state.getWebSockets();
-  }
-
-  // 处理 WebSocket 升级请求
   async fetch(request) {
     if (request.headers.get('Upgrade') !== 'websocket') {
       return new Response('Expected WebSocket', { status: 426 });
     }
 
-    const conns = this.getConnections();
-
-    if (conns.length >= 2) {
+    if (this.connections.size >= 2) {
       const pair = new WebSocketPair();
       const [client, server] = [pair[0], pair[1]];
       server.accept();
@@ -34,112 +27,50 @@ export class Room {
       return new Response(null, { status: 101, webSocket: client });
     }
 
-    // 使用 Hibernation API：让 DO 在空闲时可休眠，减少唤醒延迟
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
-    server.serializeAttachment({ color: null, latency: 0, online: true });
-    await this.state.acceptWebSocket(server);
+    this.acceptWebSocket(server);
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  // WebSocket Hibernation API：连接建立时调用
-  async webSocketConnect(ws) {
-    const conns = this.getConnections();
-    // 第二个玩家加入时分配颜色
-    if (conns.length === 2 && !this.blackPlayer) {
+  acceptWebSocket(ws) {
+    ws.accept();
+
+    const wsId = this.nextId++;
+    this.connections.set(wsId, { ws, color: null, latency: 0, online: true });
+
+    ws.addEventListener('message', (event) => {
+      this.handleMessage(wsId, event.data);
+    });
+
+    ws.addEventListener('close', () => {
+      this.handleClose(wsId);
+    });
+
+    ws.addEventListener('error', () => {
+      this.handleClose(wsId);
+    });
+
+    if (this.connections.size === 2 && !this.blackPlayer) {
       this.assignColors();
     }
   }
 
-  // WebSocket Hibernation API：收到消息时调用
-  async webSocketMessage(ws, message) {
-    let msg;
-    try {
-      msg = JSON.parse(message);
-    } catch {
-      return;
-    }
-
-    const attachment = ws.deserializeAttachment() || {};
-
-    switch (msg.type) {
-      case 'ping':
-        this.sendMessage(ws, { type: 'pong', ts: msg.ts || Date.now() });
-        break;
-
-      case 'latency':
-        attachment.latency = msg.latency;
-        ws.serializeAttachment(attachment);
-        this.broadcastStatus();
-        break;
-
-      case 'move':
-        if (!attachment.color) return;
-        this.handleMove(ws, attachment, msg);
-        break;
-
-      case 'rematchRequest':
-        this.handleRematchRequest(ws);
-        break;
-
-      case 'rematchAccept':
-        this.handleRematchAccept(ws);
-        break;
-
-      case 'rematchDecline':
-        this.handleRematchDecline(ws);
-        break;
-    }
-  }
-
-  // WebSocket Hibernation API：连接关闭时调用
-  async webSocketClose(ws, code, reason) {
-    const conns = this.getConnections();
-    if (conns.length === 0) {
-      this.state.abort();
-      return;
-    }
-    for (const c of conns) {
-      if (c !== ws) {
-        this.sendMessage(c, { type: 'opponentLeft' });
-      }
-    }
-    this.broadcastStatus();
-  }
-
-  // WebSocket Hibernation API：连接出错时调用
-  async webSocketError(ws, error) {
-    const conns = this.getConnections();
-    if (conns.length === 0) {
-      this.state.abort();
-      return;
-    }
-    for (const c of conns) {
-      if (c !== ws) {
-        this.sendMessage(c, { type: 'opponentLeft' });
-      }
-    }
-    this.broadcastStatus();
-  }
-
   assignColors() {
-    const conns = this.getConnections();
+    const ids = [...this.connections.keys()];
     const blackIdx = Math.random() < 0.5 ? 0 : 1;
-    const blackWs = conns[blackIdx];
-    const whiteWs = conns[1 - blackIdx];
+    const blackId = ids[blackIdx];
+    const whiteId = ids[1 - blackIdx];
 
-    this.blackPlayer = blackWs;
-    this.whitePlayer = whiteWs;
+    this.blackPlayer = blackId;
+    this.whitePlayer = whiteId;
 
-    for (const ws of conns) {
-      const color = ws === blackWs ? 'black' : 'white';
-      const att = ws.deserializeAttachment() || {};
-      att.color = color;
-      ws.serializeAttachment(att);
-      this.sendMessage(ws, {
+    for (const [id, conn] of this.connections) {
+      conn.color = id === blackId ? 'black' : 'white';
+      this.sendMessage(conn.ws, {
         type: 'colorAssign',
-        you: color,
-        opponent: color === 'black' ? 'white' : 'black',
+        you: conn.color,
+        opponent: id === blackId ? 'white' : 'black',
       });
     }
 
@@ -147,21 +78,62 @@ export class Room {
     this.broadcastStatus();
   }
 
-  handleMove(ws, attachment, msg) {
+  handleMessage(wsId, raw) {
+    let msg;
+    try {
+      msg = JSON.parse(raw);
+    } catch {
+      return;
+    }
+
+    const conn = this.connections.get(wsId);
+    if (!conn) return;
+
+    switch (msg.type) {
+      case 'ping':
+        this.sendMessage(conn.ws, { type: 'pong', ts: msg.ts || Date.now() });
+        break;
+
+      case 'latency':
+        conn.latency = msg.latency;
+        this.broadcastStatus();
+        break;
+
+      case 'move':
+        if (!conn.color) return;
+        this.handleMove(wsId, msg);
+        break;
+
+      case 'rematchRequest':
+        this.handleRematchRequest(wsId);
+        break;
+
+      case 'rematchAccept':
+        this.handleRematchAccept(wsId);
+        break;
+
+      case 'rematchDecline':
+        this.handleRematchDecline(wsId);
+        break;
+    }
+  }
+
+  handleMove(wsId, msg) {
     if (this.gameOver) return;
 
-    if (!attachment.color || attachment.color !== this.currentTurn) return;
+    const conn = this.connections.get(wsId);
+    if (!conn || conn.color !== this.currentTurn) return;
 
     const { row, col } = msg;
     if (row < 0 || row >= 15 || col < 0 || col >= 15) return;
     if (this.board[row][col] !== null) return;
 
-    this.board[row][col] = attachment.color;
+    this.board[row][col] = conn.color;
 
-    if (this.checkWin(row, col, attachment.color)) {
+    if (this.checkWin(row, col, conn.color)) {
       this.gameOver = true;
-      this.winner = attachment.color;
-      this.broadcast({ type: 'gameOver', winner: attachment.color });
+      this.winner = conn.color;
+      this.broadcast({ type: 'gameOver', winner: conn.color });
       this.broadcastSync();
     } else {
       this.currentTurn = this.currentTurn === 'black' ? 'white' : 'black';
@@ -202,41 +174,61 @@ export class Room {
     return false;
   }
 
-  // 处理再来一局请求
-  handleRematchRequest(ws) {
-    if (!this.gameOver) return;
+  handleClose(wsId) {
+    const conn = this.connections.get(wsId);
+    if (!conn) return;
 
-    this.rematchVotes.add(ws);
+    this.connections.delete(wsId);
+    this.rematchVotes.delete(wsId);
+
+    if (this.connections.size === 0) {
+      this.state.abort();
+      return;
+    }
+
+    for (const [, c] of this.connections) {
+      this.sendMessage(c.ws, { type: 'opponentLeft' });
+    }
+
+    this.broadcastStatus();
+  }
+
+  handleRematchRequest(wsId) {
+    if (!this.gameOver) return;
+    const conn = this.connections.get(wsId);
+    if (!conn) return;
+
+    this.rematchVotes.add(wsId);
 
     if (this.rematchVotes.size >= 2) {
       this.restartGame();
       return;
     }
 
-    const conns = this.getConnections();
-    for (const c of conns) {
-      if (c !== ws) {
-        this.sendMessage(c, { type: 'rematchRequest' });
+    for (const [id, c] of this.connections) {
+      if (id !== wsId) {
+        this.sendMessage(c.ws, { type: 'rematchRequest' });
       }
     }
   }
 
-  handleRematchAccept(ws) {
+  handleRematchAccept(wsId) {
     if (!this.gameOver) return;
+    const conn = this.connections.get(wsId);
+    if (!conn) return;
 
-    this.rematchVotes.add(ws);
+    this.rematchVotes.add(wsId);
 
     if (this.rematchVotes.size >= 2) {
       this.restartGame();
     }
   }
 
-  handleRematchDecline(ws) {
-    this.rematchVotes.delete(ws);
-    const conns = this.getConnections();
-    for (const c of conns) {
-      if (c !== ws) {
-        this.sendMessage(c, { type: 'rematchDecline' });
+  handleRematchDecline(wsId) {
+    this.rematchVotes.delete(wsId);
+    for (const [id, c] of this.connections) {
+      if (id !== wsId) {
+        this.sendMessage(c.ws, { type: 'rematchDecline' });
       }
     }
   }
@@ -263,13 +255,11 @@ export class Room {
 
   broadcastStatus() {
     const status = {};
-    const conns = this.getConnections();
-    for (const ws of conns) {
-      const att = ws.deserializeAttachment() || {};
-      if (att.color) {
-        status[att.color] = {
-          latency: att.latency || 0,
-          online: true,
+    for (const [, conn] of this.connections) {
+      if (conn.color) {
+        status[conn.color] = {
+          latency: conn.latency,
+          online: conn.online,
         };
       }
     }
@@ -278,10 +268,9 @@ export class Room {
 
   broadcast(msg) {
     const data = JSON.stringify(msg);
-    const conns = this.getConnections();
-    for (const ws of conns) {
-      if (ws.readyState === 1) {
-        ws.send(data);
+    for (const [, conn] of this.connections) {
+      if (conn.ws.readyState === 1) {
+        conn.ws.send(data);
       }
     }
   }
