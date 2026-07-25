@@ -280,14 +280,10 @@ function connect() {
       case 'colorAssign':
         myColor = msg.you;
         document.getElementById('waitingOverlay').classList.add('hidden');
-        setStatus('');
-        updateHeader();
-        break;
-
-      case 'colorAssign':
-        // 首次分配颜色
-        myColor = msg.you;
-        document.getElementById('waitingOverlay').classList.add('hidden');
+        document.getElementById('resultOverlay').classList.add('hidden');
+        document.getElementById('rematchModal').classList.add('hidden');
+        document.getElementById('rematchWaiting').classList.add('hidden');
+        gameOver = false;
         setStatus('');
         updateHeader();
         break;
