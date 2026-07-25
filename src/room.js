@@ -3,14 +3,13 @@ export class Room {
     this.state = state;
     this.env = env;
     this.board = Array.from({ length: 15 }, () => Array(15).fill(null));
-    this.connections = new Map(); // wsId -> { ws, color, latency, online, ready }
+    this.connections = new Map(); // wsId -> { ws, color, latency, online }
     this.currentTurn = 'black';
     this.gameOver = false;
     this.winner = null;
     this.blackPlayer = null;
     this.whitePlayer = null;
     this.nextId = 0;
-    this.pingInterval = null;
   }
 
   async fetch(request) {
@@ -21,11 +20,9 @@ export class Room {
     if (this.connections.size >= 2) {
       const pair = new WebSocketPair();
       const [client, server] = [pair[0], pair[1]];
-      this.acceptWebSocket(server);
-      setTimeout(() => {
-        this.sendMessage(server, { type: 'roomFull' });
-        server.close(4001, 'Room is full');
-      }, 0);
+      server.accept();
+      server.send(JSON.stringify({ type: 'roomFull' }));
+      server.close(4001, 'Room is full');
       return new Response(null, { status: 101, webSocket: client });
     }
 
@@ -36,23 +33,11 @@ export class Room {
   }
 
   acceptWebSocket(ws) {
+    // 关键：必须调用 accept() 才能发送和接收消息
+    ws.accept();
+
     const wsId = this.nextId++;
-    this.connections.set(wsId, { ws, color: null, latency: 0, online: false, ready: false });
-
-    ws.addEventListener('open', () => {
-      const conn = this.connections.get(wsId);
-      if (!conn) return;
-      conn.ready = true;
-      conn.online = true;
-
-      // If this is the second player and both are ready, assign colors
-      if (this.connections.size === 2 && !this.blackPlayer) {
-        const allReady = [...this.connections.values()].every(c => c.ready);
-        if (allReady) {
-          this.assignColors();
-        }
-      }
-    });
+    this.connections.set(wsId, { ws, color: null, latency: 0, online: true });
 
     ws.addEventListener('message', (event) => {
       this.handleMessage(wsId, event.data);
@@ -66,18 +51,9 @@ export class Room {
       this.handleClose(wsId);
     });
 
-    // Start ping interval if not already started
-    if (!this.pingInterval) {
-      this.pingInterval = setInterval(() => this.pingAll(), 3000);
-    }
-  }
-
-  pingAll() {
-    const now = Date.now();
-    for (const [id, conn] of this.connections) {
-      if (conn.ws.readyState === 1) {
-        this.sendMessage(conn.ws, { type: 'ping', ts: now });
-      }
+    // 第二个玩家加入时分配颜色
+    if (this.connections.size === 2 && !this.blackPlayer) {
+      this.assignColors();
     }
   }
 
@@ -115,9 +91,12 @@ export class Room {
     if (!conn) return;
 
     switch (msg.type) {
-      case 'pong':
-        conn.latency = Date.now() - msg.ts;
-        conn.online = true;
+      case 'ping':
+        this.sendMessage(conn.ws, { type: 'pong', ts: msg.ts });
+        break;
+
+      case 'latency':
+        conn.latency = msg.latency;
         this.broadcastStatus();
         break;
 
@@ -191,15 +170,10 @@ export class Room {
     this.connections.delete(wsId);
 
     if (this.connections.size === 0) {
-      if (this.pingInterval) {
-        clearInterval(this.pingInterval);
-        this.pingInterval = null;
-      }
       this.state.abort();
       return;
     }
 
-    // Notify remaining player
     for (const [, c] of this.connections) {
       this.sendMessage(c.ws, { type: 'opponentLeft' });
     }

@@ -231,15 +231,26 @@ function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(proto + '://' + location.host + '/ws?room=' + roomId);
 
+  // 客户端每 3 秒发起 ping 测量延迟
+  var pingTimer = null;
+
   ws.onopen = () => {
     setStatus('已连接，等待对手...');
+    pingTimer = setInterval(() => {
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'ping', ts: Date.now() }));
+      }
+    }, 3000);
   };
 
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
     switch (msg.type) {
-      case 'ping':
-        ws.send(JSON.stringify({ type: 'pong', ts: msg.ts }));
+      case 'pong':
+        var lat = Date.now() - msg.ts;
+        if (ws && ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: 'latency', latency: lat }));
+        }
         break;
 
       case 'status':
@@ -291,6 +302,7 @@ function connect() {
   };
 
   ws.onclose = () => {
+    if (pingTimer) clearInterval(pingTimer);
     if (!gameOver) setStatus('连接断开，正在重连...');
     setTimeout(() => {
       if (!gameOver) connect();
