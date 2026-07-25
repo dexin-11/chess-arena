@@ -374,7 +374,7 @@ function acceptRematch() {
   if (ws && ws.readyState === 1) {
     ws.send(JSON.stringify({ type: 'rematchAccept' }));
     document.getElementById('rematchModal').classList.add('hidden');
-    document.getElementById('rematchWaiting').classList.remove('hidden');
+    // 被请求方同意后等待服务端重启游戏，不显示"等待对方同意"
   }
 }
 
