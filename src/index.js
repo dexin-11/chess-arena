@@ -203,13 +203,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 
 <div class="rematch-modal hidden" id="rematchModal">
   <div class="rematch-modal-text" id="rematchModalText">对方请求再来一局</div>
-  <div class="rematch-select-row">
-    <label for="acceptGameSelect">棋种：</label>
-    <select id="acceptGameSelect">
-      <option value="gomoku">五子棋</option>
-      <option value="chess">国际象棋</option>
-    </select>
-  </div>
   <div class="rematch-buttons">
     <button class="btn" onclick="acceptRematch()">同意</button>
     <button class="btn btn-secondary" onclick="declineRematch()">拒绝</button>
@@ -532,7 +525,6 @@ function setStatus(msg, isCheck) {
 
 function setRematchSelectDefaults() {
   document.getElementById('rematchGameSelect').value = gameType;
-  document.getElementById('acceptGameSelect').value = gameType;
   document.getElementById('rematchHint').textContent = '';
 }
 
@@ -653,11 +645,11 @@ function connect() {
         break;
 
       case 'rematchRequest':
-        // 对方请求再来一局，弹出同意/拒绝弹窗（含棋种选择）
+        // 对方请求再来一局，弹窗显示对方选择的棋种，我方只点同意/拒绝
         rematchRole = 'accepter';
         document.getElementById('rematchWaiting').classList.add('hidden');
-        document.getElementById('rematchModalText').textContent = '对方请求再来一局';
-        setRematchSelectDefaults();
+        const gameName = msg.gameType === 'chess' ? '国际象棋' : '五子棋';
+        document.getElementById('rematchModalText').textContent = '对方申请在下一盘' + gameName;
         document.getElementById('rematchModal').classList.remove('hidden');
         break;
 
@@ -670,16 +662,12 @@ function connect() {
         break;
 
       case 'rematchMismatch':
+        // 双方几乎同时点 request 且选了不同棋种：双方都回到结果弹窗重新发起
         document.getElementById('rematchWaiting').classList.add('hidden');
-        if (rematchRole === 'accepter') {
-          document.getElementById('rematchModalText').textContent = '双方选择不一致，请重新选择';
-          document.getElementById('rematchModal').classList.remove('hidden');
-        } else {
-          // 请求方：回到结果弹窗以便重新选择棋种
-          rematchRole = 'requester';
-          document.getElementById('resultOverlay').classList.remove('hidden');
-          document.getElementById('rematchHint').textContent = '双方选择不一致，请重新选择';
-        }
+        document.getElementById('rematchModal').classList.add('hidden');
+        rematchRole = null;
+        document.getElementById('resultOverlay').classList.remove('hidden');
+        document.getElementById('rematchHint').textContent = '双方选择不一致，请重新发起';
         break;
 
       case 'roomFull':
@@ -729,9 +717,9 @@ function requestRematch() {
 
 function acceptRematch() {
   if (ws && ws.readyState === 1) {
-    const gt = document.getElementById('acceptGameSelect').value;
     rematchRole = 'accepter';
-    ws.send(JSON.stringify({ type: 'rematchAccept', gameType: gt }));
+    // 被请求方无需选择棋种，服务端会采用请求方已选的棋种
+    ws.send(JSON.stringify({ type: 'rematchAccept' }));
     document.getElementById('rematchModal').classList.add('hidden');
     // 被请求方同意后等待服务端重启游戏（或发送 rematchMismatch）
   }
