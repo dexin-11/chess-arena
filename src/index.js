@@ -62,6 +62,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .result-overlay.hidden { display: none; }
 .result-text { font-size: 28px; font-weight: bold; }
 
+.rematch-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; z-index: 110; }
+.rematch-modal.hidden { display: none; }
+.rematch-modal-text { font-size: 18px; color: #eee; }
+.rematch-buttons { display: flex; gap: 12px; }
+.btn-secondary { background: #444; }
+.btn-secondary:hover { background: #555; }
+
 @media (max-width: 540px) {
   .cell { width: 24px; height: 24px; }
   .cell .stone, .cell .preview { width: 20px; height: 20px; }
@@ -98,7 +105,20 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 
 <div class="result-overlay hidden" id="resultOverlay">
   <div class="result-text" id="resultText"></div>
-  <button class="btn" onclick="location.reload()">再来一局</button>
+  <button class="btn" id="rematchBtn" onclick="requestRematch()">再来一局</button>
+</div>
+
+<div class="rematch-modal hidden" id="rematchModal">
+  <div class="rematch-modal-text" id="rematchModalText">对方请求再来一局</div>
+  <div class="rematch-buttons">
+    <button class="btn" onclick="acceptRematch()">同意</button>
+    <button class="btn btn-secondary" onclick="declineRematch()">拒绝</button>
+  </div>
+</div>
+
+<div class="rematch-modal hidden" id="rematchWaiting">
+  <div class="rematch-modal-text">等待对方同意...</div>
+  <button class="btn btn-secondary" onclick="cancelRematch()">取消</button>
 </div>
 
 <script>
@@ -264,6 +284,14 @@ function connect() {
         updateHeader();
         break;
 
+      case 'colorAssign':
+        // 首次分配颜色
+        myColor = msg.you;
+        document.getElementById('waitingOverlay').classList.add('hidden');
+        setStatus('');
+        updateHeader();
+        break;
+
       case 'sync':
         boardData = msg.board;
         currentTurn = msg.currentTurn;
@@ -290,6 +318,28 @@ function connect() {
         updateHeader();
         break;
 
+      case 'rematchRequest':
+        document.getElementById('rematchWaiting').classList.add('hidden');
+        document.getElementById('rematchModal').classList.remove('hidden');
+        break;
+
+      case 'rematchDecline':
+        document.getElementById('rematchWaiting').classList.add('hidden');
+        document.getElementById('statusMsg').textContent = '对方拒绝了再来一局';
+        break;
+
+      case 'colorAssign':
+        // 重开游戏：隐藏所有弹窗，重置状态
+        myColor = msg.you;
+        document.getElementById('waitingOverlay').classList.add('hidden');
+        document.getElementById('resultOverlay').classList.add('hidden');
+        document.getElementById('rematchModal').classList.add('hidden');
+        document.getElementById('rematchWaiting').classList.add('hidden');
+        gameOver = false;
+        setStatus('');
+        updateHeader();
+        break;
+
       case 'roomFull':
         setStatus('房间已满，请创建新游戏');
         ws.close();
@@ -310,6 +360,38 @@ function connect() {
   };
 
   ws.onerror = () => {};
+}
+
+function requestRematch() {
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'rematchRequest' }));
+    document.getElementById('resultOverlay').classList.add('hidden');
+    document.getElementById('rematchWaiting').classList.remove('hidden');
+  }
+}
+
+function acceptRematch() {
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'rematchAccept' }));
+    document.getElementById('rematchModal').classList.add('hidden');
+    document.getElementById('rematchWaiting').classList.remove('hidden');
+  }
+}
+
+function declineRematch() {
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'rematchDecline' }));
+    document.getElementById('rematchModal').classList.add('hidden');
+    document.getElementById('resultOverlay').classList.remove('hidden');
+  }
+}
+
+function cancelRematch() {
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'rematchDecline' }));
+    document.getElementById('rematchWaiting').classList.add('hidden');
+    document.getElementById('resultOverlay').classList.remove('hidden');
+  }
 }
 
 function copyLink() {

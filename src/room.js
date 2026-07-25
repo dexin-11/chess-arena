@@ -10,6 +10,7 @@ export class Room {
     this.blackPlayer = null;
     this.whitePlayer = null;
     this.nextId = 0;
+    this.rematchVotes = new Set(); // wsId 集合
   }
 
   async fetch(request) {
@@ -104,6 +105,18 @@ export class Room {
         if (!conn.color) return;
         this.handleMove(wsId, msg);
         break;
+
+      case 'rematchRequest':
+        this.handleRematchRequest(wsId);
+        break;
+
+      case 'rematchAccept':
+        this.handleRematchAccept(wsId);
+        break;
+
+      case 'rematchDecline':
+        this.handleRematchDecline(wsId);
+        break;
     }
   }
 
@@ -168,6 +181,7 @@ export class Room {
     if (!conn) return;
 
     this.connections.delete(wsId);
+    this.rematchVotes.delete(wsId);
 
     if (this.connections.size === 0) {
       this.state.abort();
@@ -179,6 +193,61 @@ export class Room {
     }
 
     this.broadcastStatus();
+  }
+
+  // 处理再来一局请求
+  handleRematchRequest(wsId) {
+    if (!this.gameOver) return;
+    const conn = this.connections.get(wsId);
+    if (!conn) return;
+
+    this.rematchVotes.add(wsId);
+
+    // 如果两位玩家都请求，直接重开
+    if (this.rematchVotes.size >= 2) {
+      this.restartGame();
+      return;
+    }
+
+    // 否则通知对方
+    for (const [id, c] of this.connections) {
+      if (id !== wsId) {
+        this.sendMessage(c.ws, { type: 'rematchRequest' });
+      }
+    }
+  }
+
+  handleRematchAccept(wsId) {
+    if (!this.gameOver) return;
+    const conn = this.connections.get(wsId);
+    if (!conn) return;
+
+    this.rematchVotes.add(wsId);
+
+    if (this.rematchVotes.size >= 2) {
+      this.restartGame();
+    }
+  }
+
+  handleRematchDecline(wsId) {
+    this.rematchVotes.delete(wsId);
+    // 通知对方拒绝
+    for (const [id, c] of this.connections) {
+      if (id !== wsId) {
+        this.sendMessage(c.ws, { type: 'rematchDecline' });
+      }
+    }
+  }
+
+  restartGame() {
+    this.board = Array.from({ length: 15 }, () => Array(15).fill(null));
+    this.currentTurn = 'black';
+    this.gameOver = false;
+    this.winner = null;
+    this.rematchVotes.clear();
+
+    // 重新随机分配颜色
+    this.assignColors();
   }
 
   broadcastSync() {
