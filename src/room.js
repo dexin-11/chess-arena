@@ -115,6 +115,14 @@ export class Room {
       case 'rematchDecline':
         this.handleRematchDecline(wsId);
         break;
+
+      case 'waitNotice':
+        for (const [id, c] of this.connections) {
+          if (id !== wsId) {
+            this.sendMessage(c.ws, { type: 'waitNotice' });
+          }
+        }
+        break;
     }
   }
 

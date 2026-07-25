@@ -68,6 +68,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .rematch-buttons { display: flex; gap: 12px; }
 .btn-secondary { background: #444; }
 .btn-secondary:hover { background: #555; }
+.button-row { display: flex; gap: 12px; }
 
 @media (max-width: 540px) {
   .cell { width: 24px; height: 24px; }
@@ -94,7 +95,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 <div class="board-container">
   <div class="status-msg" id="statusMsg"></div>
   <div class="board" id="board"></div>
-  <button class="btn" id="copyBtn" onclick="copyLink()">复制链接邀请好友</button>
+  <div class="button-row">
+    <button class="btn" id="copyBtn" onclick="copyLink()">复制链接邀请好友</button>
+    <button class="btn btn-secondary" id="waitBtn" onclick="sendWaitNotice()">等一会</button>
+  </div>
 </div>
 
 <div class="waiting-overlay" id="waitingOverlay">
@@ -345,6 +349,10 @@ function connect() {
       case 'opponentLeft':
         setStatus('对手已断开');
         break;
+
+      case 'waitNotice':
+        setStatus('对方说：请等我一会');
+        break;
     }
   };
 
@@ -388,6 +396,16 @@ function cancelRematch() {
     ws.send(JSON.stringify({ type: 'rematchDecline' }));
     document.getElementById('rematchWaiting').classList.add('hidden');
     document.getElementById('resultOverlay').classList.remove('hidden');
+  }
+}
+
+function sendWaitNotice() {
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'waitNotice' }));
+    document.getElementById('waitBtn').textContent = '已通知';
+    setTimeout(() => {
+      document.getElementById('waitBtn').textContent = '等一会';
+    }, 2000);
   }
 }
 
