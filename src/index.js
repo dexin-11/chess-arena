@@ -145,8 +145,9 @@ function init() {
     history.replaceState({}, '', '?room=' + roomId);
   }
   document.getElementById('roomId').textContent = roomId;
-  buildBoard();
+  // 先启动 WebSocket 连接（与 DOM 构建并行，减少首次交互延迟）
   connect();
+  buildBoard();
 }
 
 function buildBoard() {
@@ -433,8 +434,12 @@ export default {
       return stub.fetch(request);
     }
 
+    // 流式传输 HTML + 缓存 1 小时，减少重复访问延迟
     return new Response(INDEX_HTML, {
-      headers: { 'Content-Type': 'text/html;charset=utf-8' },
+      headers: {
+        'Content-Type': 'text/html;charset=utf-8',
+        'Cache-Control': 'public, max-age=3600',
+      },
     });
   },
 };
