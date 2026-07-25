@@ -1,8 +1,15 @@
+import * as Chess from './chess.js';
+
 export class Room {
   constructor(state, env) {
     this.state = state;
     this.env = env;
+    this.gameType = null; // 'gomoku' | 'chess'，首次连接时确定
     this.board = Array.from({ length: 15 }, () => Array(15).fill(null));
+    this.chessBoard = null;
+    this.chessState = null;
+    this.lastMove = null;
+    this.draw = false;
     this.connections = new Map(); // wsId -> { ws, color, latency, online }
     this.currentTurn = 'black';
     this.gameOver = false;
@@ -10,7 +17,7 @@ export class Room {
     this.blackPlayer = null;
     this.whitePlayer = null;
     this.nextId = 0;
-    this.rematchVotes = new Set();
+    this.rematchVotes = new Map(); // wsId -> gameType
   }
 
   async fetch(request) {
@@ -27,17 +34,35 @@ export class Room {
       return new Response(null, { status: 101, webSocket: client });
     }
 
+    // 从 URL 读取 game 参数，仅在首次连接时用于确定房间棋种
+    let gameTypeFromUrl = 'gomoku';
+    try {
+      const url = new URL(request.url);
+      if (url.searchParams.get('game') === 'chess') gameTypeFromUrl = 'chess';
+    } catch {
+      // 忽略 URL 解析错误，使用默认值
+    }
+
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
-    this.acceptWebSocket(server);
+    this.acceptWebSocket(server, gameTypeFromUrl);
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  acceptWebSocket(ws) {
+  acceptWebSocket(ws, gameTypeFromUrl) {
     ws.accept();
 
     const wsId = this.nextId++;
     this.connections.set(wsId, { ws, color: null, latency: 0, online: true });
+
+    // 首次连接确定房间棋种并初始化对应状态
+    if (this.gameType === null) {
+      this.gameType = gameTypeFromUrl || 'gomoku';
+      if (this.gameType === 'chess') {
+        this.initChessState();
+        this.currentTurn = 'white'; // 国际象棋白方先行
+      }
+    }
 
     ws.addEventListener('message', (event) => {
       this.handleMessage(wsId, event.data);
@@ -72,6 +97,7 @@ export class Room {
           type: 'colorAssign',
           you: assignedColor,
           opponent: assignedColor === 'black' ? 'white' : 'black',
+          gameType: this.gameType,
         });
         this.broadcastSync();
         this.broadcastStatus();
@@ -86,6 +112,17 @@ export class Room {
     } else if (this.connections.size === 2) {
       this.assignColors();
     }
+  }
+
+  initChessState() {
+    this.chessBoard = Chess.initialBoard();
+    this.chessState = {
+      castlingRights: {
+        white: { k: true, q: true },
+        black: { k: true, q: true },
+      },
+      enPassantTarget: null,
+    };
   }
 
   assignColors() {
@@ -103,6 +140,7 @@ export class Room {
         type: 'colorAssign',
         you: conn.color,
         opponent: id === blackId ? 'white' : 'black',
+        gameType: this.gameType,
       });
     }
 
@@ -133,15 +171,28 @@ export class Room {
 
       case 'move':
         if (!conn.color) return;
-        this.handleMove(wsId, msg);
+        if (this.gameType === 'chess') this.handleChessMove(wsId, msg);
+        else this.handleMove(wsId, msg);
+        break;
+
+      case 'getMoves':
+        // 国际象棋：返回选中棋子的合法走法，供客户端高亮
+        if (this.gameType === 'chess' && this.chessBoard) {
+          const f = msg.from;
+          if (f && Number.isInteger(f.r) && Number.isInteger(f.c) &&
+              f.r >= 0 && f.r < 8 && f.c >= 0 && f.c < 8) {
+            const moves = Chess.getLegalMoves(this.chessBoard, f.r, f.c, this.chessState);
+            this.sendMessage(conn.ws, { type: 'legalMoves', from: { r: f.r, c: f.c }, moves });
+          }
+        }
         break;
 
       case 'rematchRequest':
-        this.handleRematchRequest(wsId);
+        this.handleRematchRequest(wsId, msg);
         break;
 
       case 'rematchAccept':
-        this.handleRematchAccept(wsId);
+        this.handleRematchAccept(wsId, msg);
         break;
 
       case 'rematchDecline':
@@ -181,11 +232,80 @@ export class Room {
     if (this.checkWin(row, col, conn.color)) {
       this.gameOver = true;
       this.winner = conn.color;
-      this.broadcast({ type: 'gameOver', winner: conn.color });
+      this.draw = false;
+      this.broadcast({ type: 'gameOver', winner: conn.color, draw: false });
       this.broadcastSync();
     } else {
       this.currentTurn = this.currentTurn === 'black' ? 'white' : 'black';
       this.broadcastSync();
+    }
+  }
+
+  handleChessMove(wsId, msg) {
+    if (this.gameOver) return;
+
+    const conn = this.connections.get(wsId);
+    if (!conn || conn.color !== this.currentTurn) return;
+    if (!this.chessBoard || !this.chessState) return;
+
+    const from = msg.from, to = msg.to;
+    if (!from || !to) return;
+    if (!Number.isInteger(from.r) || !Number.isInteger(from.c) ||
+        !Number.isInteger(to.r) || !Number.isInteger(to.c)) return;
+    if (from.r < 0 || from.r > 7 || from.c < 0 || from.c > 7 ||
+        to.r < 0 || to.r > 7 || to.c < 0 || to.c > 7) return;
+
+    const piece = this.chessBoard[from.r][from.c];
+    if (!piece || piece.color !== conn.color) return;
+
+    const legalMoves = Chess.getLegalMoves(this.chessBoard, from.r, from.c, this.chessState);
+
+    // 先按 from/to/special 精确匹配；找不到再按 from/to 兜底（客户端可能省略 special）
+    let matched = legalMoves.find(
+      (m) =>
+        m.from.r === from.r && m.from.c === from.c &&
+        m.to.r === to.r && m.to.c === to.c &&
+        (m.special || null) === (msg.special || null)
+    );
+    if (!matched) {
+      matched = legalMoves.find(
+        (m) =>
+          m.from.r === from.r && m.from.c === from.c &&
+          m.to.r === to.r && m.to.c === to.c
+      );
+    }
+    if (!matched) return;
+
+    const promotionPiece = matched.special === 'promotion' ? (msg.promotionPiece || 'q') : undefined;
+    const result = Chess.applyMove(this.chessBoard, matched, this.chessState, promotionPiece);
+    this.chessBoard = result.board;
+    this.chessState = result.newState;
+    this.lastMove = { from: { r: matched.from.r, c: matched.from.c }, to: { r: matched.to.r, c: matched.to.c } };
+
+    const opponentColor = conn.color === 'white' ? 'black' : 'white';
+    this.currentTurn = opponentColor;
+
+    if (Chess.isCheckmate(this.chessBoard, opponentColor, this.chessState)) {
+      this.gameOver = true;
+      this.winner = conn.color;
+      this.draw = false;
+      this.broadcast({ type: 'gameOver', winner: conn.color, draw: false });
+      this.broadcastSync();
+    } else if (
+      Chess.isStalemate(this.chessBoard, opponentColor, this.chessState) ||
+      Chess.isInsufficientMaterial(this.chessBoard)
+    ) {
+      this.gameOver = true;
+      this.winner = null;
+      this.draw = true;
+      this.broadcast({ type: 'gameOver', winner: null, draw: true });
+      this.broadcastSync();
+    } else {
+      this.broadcastSync();
+      // 非将杀的将军：sync 之后发送 check 通知，客户端据此高亮被将军的王
+      if (Chess.isInCheck(this.chessBoard, opponentColor)) {
+        this.broadcast({ type: 'check', color: opponentColor });
+      }
     }
   }
 
@@ -241,18 +361,20 @@ export class Room {
     this.broadcastStatus();
   }
 
-  handleRematchRequest(wsId) {
+  handleRematchRequest(wsId, msg) {
     if (!this.gameOver) return;
     const conn = this.connections.get(wsId);
     if (!conn) return;
 
-    this.rematchVotes.add(wsId);
+    const gameType = this.normalizeGameType(msg && msg.gameType);
+    this.rematchVotes.set(wsId, gameType);
 
-    if (this.rematchVotes.size >= 2) {
-      this.restartGame();
+    if (this.rematchVotes.size >= 2 && this.bothVoted()) {
+      this.resolveRematch();
       return;
     }
 
+    // 仅一方投票：通知对方（不带 gameType，对方在自己弹窗里选择）
     for (const [id, c] of this.connections) {
       if (id !== wsId) {
         this.sendMessage(c.ws, { type: 'rematchRequest' });
@@ -260,15 +382,16 @@ export class Room {
     }
   }
 
-  handleRematchAccept(wsId) {
+  handleRematchAccept(wsId, msg) {
     if (!this.gameOver) return;
     const conn = this.connections.get(wsId);
     if (!conn) return;
 
-    this.rematchVotes.add(wsId);
+    const gameType = this.normalizeGameType(msg && msg.gameType);
+    this.rematchVotes.set(wsId, gameType);
 
-    if (this.rematchVotes.size >= 2) {
-      this.restartGame();
+    if (this.rematchVotes.size >= 2 && this.bothVoted()) {
+      this.resolveRematch();
     }
   }
 
@@ -281,24 +404,61 @@ export class Room {
     }
   }
 
-  restartGame() {
-    this.board = Array.from({ length: 15 }, () => Array(15).fill(null));
-    this.currentTurn = 'black';
+  // 两端均已投票时比较棋种：一致则开新局，不一致则通知双方重选
+  resolveRematch() {
+    const values = [...this.rematchVotes.values()];
+    if (values.length >= 2 && values[0] === values[1]) {
+      this.restartGame(values[0]);
+    } else {
+      this.broadcast({ type: 'rematchMismatch' });
+      this.rematchVotes.clear();
+    }
+  }
+
+  bothVoted() {
+    let count = 0;
+    for (const id of this.connections.keys()) {
+      if (this.rematchVotes.has(id)) count++;
+    }
+    return count >= 2;
+  }
+
+  normalizeGameType(gt) {
+    return gt === 'chess' ? 'chess' : 'gomoku';
+  }
+
+  restartGame(newGameType) {
+    this.gameType = this.normalizeGameType(newGameType);
+    if (this.gameType === 'chess') {
+      this.initChessState();
+      this.currentTurn = 'white';
+    } else {
+      this.board = Array.from({ length: 15 }, () => Array(15).fill(null));
+      this.currentTurn = 'black';
+    }
     this.gameOver = false;
     this.winner = null;
+    this.draw = false;
+    this.lastMove = null;
     this.rematchVotes.clear();
 
     this.assignColors();
   }
 
   broadcastSync() {
-    this.broadcast({
+    const payload = {
       type: 'sync',
-      board: this.board,
+      gameType: this.gameType,
+      board: this.gameType === 'chess' ? this.chessBoard : this.board,
       currentTurn: this.currentTurn,
       gameOver: this.gameOver,
       winner: this.winner,
-    });
+      draw: this.draw,
+    };
+    if (this.gameType === 'chess') {
+      payload.lastMove = this.lastMove;
+    }
+    this.broadcast(payload);
   }
 
   broadcastStatus() {
