@@ -70,6 +70,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .btn-secondary:hover { background: #555; }
 .button-row { display: flex; gap: 12px; }
 
+.wait-notice-overlay { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #e94560; color: #fff; padding: 16px 32px; border-radius: 12px; font-size: 18px; font-weight: bold; box-shadow: 0 4px 20px rgba(233,69,96,0.5); z-index: 200; animation: slideDown 0.3s ease, fadeOut 0.5s ease 4.5s forwards; }
+@keyframes slideDown { from { transform: translate(-50%, -100px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+@keyframes fadeOut { to { opacity: 0; transform: translate(-50%, -20px); } }
+
 @media (max-width: 540px) {
   .cell { width: 24px; height: 24px; }
   .cell .stone, .cell .preview { width: 20px; height: 20px; }
@@ -351,7 +355,7 @@ function connect() {
         break;
 
       case 'waitNotice':
-        setStatus('对方说：请等我一会');
+        showWaitNotice('对方说：请等我一会');
         break;
     }
   };
@@ -406,6 +410,31 @@ function sendWaitNotice() {
     setTimeout(() => {
       document.getElementById('waitBtn').textContent = '等一会';
     }, 2000);
+  }
+}
+
+function showWaitNotice(text) {
+  // 页内横幅通知
+  var existing = document.getElementById('waitNoticeOverlay');
+  if (existing) existing.remove();
+  var el = document.createElement('div');
+  el.id = 'waitNoticeOverlay';
+  el.className = 'wait-notice-overlay';
+  el.textContent = text;
+  document.body.appendChild(el);
+  setTimeout(function() { if (el.parentNode) el.remove(); }, 5000);
+
+  // 浏览器系统通知
+  if ('Notification' in window) {
+    if (Notification.permission === 'granted') {
+      new Notification('五子棋对战', { body: text });
+    } else if (Notification.permission !== 'denied') {
+      Notification.requestPermission().then(function(p) {
+        if (p === 'granted') {
+          new Notification('五子棋对战', { body: text });
+        }
+      });
+    }
   }
 }
 
