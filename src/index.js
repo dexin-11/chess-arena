@@ -1533,15 +1533,18 @@ function connect() {
 
       case 'colorAssign':
         myColor = msg.you;
-        if (msg.gameType && msg.gameType !== gameType) {
-          gameType = msg.gameType;
-          buildBoard();
-        } else if (msg.gameType) {
+        const prevGameType = gameType;
+        if (msg.gameType) {
           gameType = msg.gameType;
         }
         chessFlipped = (gameType === 'chess' && myColor === 'black');
         xiangqiFlipped = (gameType === 'xiangqi' && myColor === 'black');
         gomokuFlipped = (gameType === 'gomoku' && myColor === 'white');
+        // gameType 变化时重建棋盘；五子棋因 renderGomoku 增量更新不重建网格，
+        // 需在 gomokuFlipped 变化后显式 buildBoard 应用翻转
+        if (gameType !== prevGameType || gameType === 'gomoku') {
+          buildBoard();
+        }
         chessSelected = null;
         chessLegalMoves = [];
         chessState = null;
