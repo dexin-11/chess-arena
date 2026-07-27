@@ -356,16 +356,42 @@ export function getLegalMoves(board, r, c, state) {
 }
 
 // 判断 color 方是否还有任意合法走法（用于将杀/困毙判定）。
-export function hasAnyLegalMove(board, color, state) {
+// 用 make/unmake 原地走法替代 cloneBoard，仅服务端将杀/困毙判定路径使用。
+// 中国象棋 applyMove 极简（仅移动棋子，无易位/升变/过路兵），make/unmake 只需还原 to/from。
+function makeMoveInPlace(board, move) {
+  const from = move.from, to = move.to;
+  const piece = board[from.r][from.c];
+  const captured = board[to.r][to.c];
+  board[to.r][to.c] = piece;
+  board[from.r][from.c] = null;
+  return { piece, captured };
+}
+
+function unmakeMove(board, move, undo) {
+  const from = move.from, to = move.to;
+  board[from.r][from.c] = undo.piece;
+  board[to.r][to.c] = undo.captured;
+}
+
+export function hasAnyLegalMoveFast(board, color, state) {
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       const p = board[r][c];
-      if (p && p.color === color) {
-        if (getLegalMoves(board, r, c, state).length > 0) return true;
+      if (!p || p.color !== color) continue;
+      const pseudo = getPseudoLegalMoves(board, r, c, state);
+      for (const move of pseudo) {
+        const undo = makeMoveInPlace(board, move);
+        const ok = !isInCheck(board, color);
+        unmakeMove(board, move, undo);
+        if (ok) return true;
       }
     }
   }
   return false;
+}
+
+export function hasAnyLegalMove(board, color, state) {
+  return hasAnyLegalMoveFast(board, color, state);
 }
 
 // 将杀：被将军且无合法走法。

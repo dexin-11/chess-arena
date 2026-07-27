@@ -331,16 +331,92 @@ export function getLegalMoves(board, r, c, state) {
 }
 
 // 判断 color 方是否还有任意合法走法（用于将杀/逼和判定）。
-export function hasAnyLegalMove(board, color, state) {
+// 用 make/unmake 原地走法替代 cloneBoard，仅服务端将杀/逼和判定路径使用。
+// 语义与原 getLegalMoves 版完全一致（含易位额外校验、promotion 按 'q' 升变）。
+function makeMoveInPlace(board, move) {
+  const from = move.from, to = move.to;
+  const piece = board[from.r][from.c];
+  const color = piece.color;
+  const undo = {
+    piece,            // 原棋子（promotion 时仍为 pawn）
+    captured: null,   // 目标格原棋子
+    enPassantCap: null, // 过路兵被吃位置与原值
+    castleRook: null,   // 易位时车移动信息
+  };
+  if (move.special === 'enpassant') {
+    undo.enPassantCap = { r: from.r, c: to.c, piece: board[from.r][to.c] };
+    board[from.r][to.c] = null;
+  } else {
+    undo.captured = board[to.r][to.c];
+  }
+  if (move.special === 'castle-kingside') {
+    const row = from.r;
+    undo.castleRook = { fromR: row, fromC: 7, toR: row, toC: 5, piece: board[row][7] };
+    board[row][5] = board[row][7];
+    board[row][7] = null;
+  } else if (move.special === 'castle-queenside') {
+    const row = from.r;
+    undo.castleRook = { fromR: row, fromC: 0, toR: row, toC: 3, piece: board[row][0] };
+    board[row][3] = board[row][0];
+    board[row][0] = null;
+  }
+  if (move.special === 'promotion') {
+    board[to.r][to.c] = { type: 'q', color };
+  } else {
+    board[to.r][to.c] = piece;
+  }
+  board[from.r][from.c] = null;
+  return undo;
+}
+
+function unmakeMove(board, move, undo) {
+  const from = move.from, to = move.to;
+  // 还原原棋子到起点（promotion 时还原为原 pawn）
+  board[from.r][from.c] = undo.piece;
+  // 还原目标格
+  if (move.special === 'enpassant') {
+    board[to.r][to.c] = null;
+    board[undo.enPassantCap.r][undo.enPassantCap.c] = undo.enPassantCap.piece;
+  } else {
+    board[to.r][to.c] = undo.captured;
+  }
+  // 还原易位时的车
+  if (undo.castleRook) {
+    board[undo.castleRook.fromR][undo.castleRook.fromC] = undo.castleRook.piece;
+    board[undo.castleRook.toR][undo.castleRook.toC] = null;
+  }
+}
+
+export function hasAnyLegalMoveFast(board, color, state) {
+  const opponent = opposite(color);
   for (let r = 0; r < 8; r++) {
     for (let c = 0; c < 8; c++) {
       const p = board[r][c];
-      if (p && p.color === color) {
-        if (getLegalMoves(board, r, c, state).length > 0) return true;
+      if (!p || p.color !== color) continue;
+      const pseudo = getPseudoLegalMoves(board, r, c, state);
+      for (const move of pseudo) {
+        // 易位：与 getLegalMoves 完全一致的额外路径校验（保持判定结果一致）
+        if (move.special === 'castle-kingside' || move.special === 'castle-queenside') {
+          const row = move.from.r;
+          const startC = 4;
+          const midC = move.special === 'castle-kingside' ? 5 : 3;
+          const endC = move.special === 'castle-kingside' ? 6 : 2;
+          if (isSquareAttacked(board, row, startC, opponent)) continue;
+          if (isSquareAttacked(board, row, midC, opponent)) continue;
+          if (isSquareAttacked(board, row, endC, opponent)) continue;
+        }
+        const undo = makeMoveInPlace(board, move);
+        const ok = !isInCheck(board, color);
+        unmakeMove(board, move, undo);
+        if (ok) return true;
       }
     }
   }
   return false;
+}
+
+export function hasAnyLegalMove(board, color, state) {
+  return hasAnyLegalMoveFast(board, color, state);
 }
 
 // 将杀：被将军且无合法走法。
