@@ -147,27 +147,19 @@ body {
 .board.xiangqi { background: linear-gradient(135deg, #f0d9a4 0%, #e6c388 50%, #dcb380 100%); padding: clamp(4px, 1.2vmin, 10px); border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.4), inset 0 0 30px rgba(120,70,20,0.15); position: relative; aspect-ratio: 9 / 10; width: auto; height: var(--board-size); max-width: 100%; flex-shrink: 1; min-width: 0; }
 .xiangqi-grid { width: 100%; height: 100%; display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); grid-template-rows: repeat(10, minmax(0, 1fr)); gap: 0; position: relative; }
 .xiangqi-cell { width: 100%; height: 100%; position: relative; cursor: pointer; display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
-/* 网格线：每个格子的中心画十字交叉线 */
-.xiangqi-cell::before { content: ''; position: absolute; top: 50%; left: 0; right: 0; height: 1.5px; background: rgba(60,30,10,0.7); transform: translateY(-50%); }
-.xiangqi-cell::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1.5px; background: rgba(60,30,10,0.7); transform: translateX(-50%); }
-/* 边界格截断外侧线：edge-top/bottom 截断垂直线(::after)，edge-left/right 截断水平线(::before) */
-.xiangqi-cell.edge-top::after { top: 50%; } /* 顶行：垂直线只在下半部分（上方无格子） */
-.xiangqi-cell.edge-bottom::after { bottom: 50%; } /* 底行：垂直线只在上半部分（下方无格子） */
-.xiangqi-cell.edge-left::before { left: 50%; } /* 左列：水平线只在右半部分（左方无格子） */
-.xiangqi-cell.edge-right::before { right: 50%; } /* 右列：水平线只在左半部分（右方无格子） */
-/* 楚河汉界断竖线：row 4 下方是河界（竖线只画上半），row 5 上方是河界（竖线只画下半） */
-.xiangqi-cell.river-edge-bottom::after { bottom: 50%; } /* row 4: 竖线只在上半部分 */
-.xiangqi-cell.river-edge-top::after { top: 50%; } /* row 5: 竖线只在下半部分 */
+/* 网格线、九宫斜线、兵炮角标全部由 SVG 矢量绘制，避免 DPR 1 屏幕子像素错位 */
 /* 楚河汉界 */
 .xiangqi-river { position: absolute; left: 0; right: 0; top: 45%; height: 10%; display: flex; align-items: center; justify-content: space-around; font-size: calc(var(--board-size) * 0.06); color: rgba(60,30,10,0.5); font-family: 'Ma Shan Zheng', 'STKaiti', 'KaiTi', serif; font-weight: 700; letter-spacing: 0.3em; pointer-events: none; z-index: 1; }
 .xiangqi-river span { display: inline-block; }
-/* 九宫格斜线（SVG 叠加层，stroke-width 用 viewBox 单位的细值，避免被放大成粗矩形） */
+/* SVG 叠加层：网格线 + 九宫斜线 + 兵炮角标 */
 .xiangqi-palace-diag { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; overflow: visible; }
 .xiangqi-palace-diag line { stroke: rgba(60,30,10,0.7); stroke-width: 0.04; stroke-linecap: round; }
+/* 网格线略粗于装饰线 */
+.xiangqi-palace-diag line.grid-line { stroke: rgba(60,30,10,0.78); stroke-width: 0.045; }
 /* 兵/炮位「十字花」角标，比九宫斜线略细 */
 .xiangqi-palace-diag line.star-mark { stroke: rgba(60,30,10,0.75); stroke-width: 0.035; }
 /* 棋子：木质浮雕硬币风格 */
-.xiangqi-cell .xpiece { position: relative; z-index: 3; width: 86%; height: 86%; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: calc(var(--board-size) * 0.062); font-family: 'Ma Shan Zheng', 'ZCOOL XiaoWei', 'STKaiti', 'KaiTi', 'Noto Serif SC', serif; font-weight: 700; line-height: 1; background: radial-gradient(circle at 32% 26%, #fff8e3 0%, #f4dba2 55%, #d4a76a 100%); box-shadow: 0 2px 5px rgba(60,30,10,0.45), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); transition: transform 0.15s ease; will-change: transform; }
+.xiangqi-cell .xpiece { position: relative; z-index: 3; width: 86%; height: 86%; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: calc(var(--board-size) * 0.05); font-family: 'Ma Shan Zheng', 'ZCOOL XiaoWei', 'STKaiti', 'KaiTi', 'Noto Serif SC', serif; font-weight: 700; line-height: 1; background: radial-gradient(circle at 32% 26%, #fff8e3 0%, #f4dba2 55%, #d4a76a 100%); box-shadow: 0 2px 5px rgba(60,30,10,0.45), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); transition: transform 0.15s ease; will-change: transform; }
 .xiangqi-cell .xpiece::before { content: ''; position: absolute; inset: 7%; border-radius: 50%; border: 1.5px solid currentColor; opacity: 0.45; pointer-events: none; }
 .xiangqi-cell .xpiece.red { color: #b91c1c; border: 2px solid #7f1d1d; text-shadow: 0 1px 0 rgba(255,250,235,0.5); }
 .xiangqi-cell .xpiece.black { color: #1f1f1f; border: 2px solid #0a0a0a; text-shadow: 0 1px 0 rgba(255,250,235,0.4); }
@@ -1142,21 +1134,6 @@ function buildXiangqiDOM(boardEl) {
       cell.dataset.row = r;
       cell.dataset.col = c;
 
-      // 边界格截断外侧网格线
-      const visualR = xiangqiFlipped ? 9 - r : r;
-      const visualC = xiangqiFlipped ? 8 - c : c;
-      if (visualR === 0) cell.classList.add('edge-top');
-      if (visualR === 9) cell.classList.add('edge-bottom');
-      if (visualC === 0) cell.classList.add('edge-left');
-      if (visualC === 8) cell.classList.add('edge-right');
-
-      // 河界断竖线：row 4 下方是河界、row 5 上方是河界，
-      // 仅边界列 (col 0/8) 的竖线保持连通，其余列在河界处断开
-      if (c !== 0 && c !== 8) {
-        if (r === 4) cell.classList.add('river-edge-bottom');
-        if (r === 5) cell.classList.add('river-edge-top');
-      }
-
       // 棋子容器（固定占位，更新时只改内容）
       const pieceSpan = document.createElement('span');
       pieceSpan.className = 'xpiece';
@@ -1184,11 +1161,59 @@ function buildXiangqiDOM(boardEl) {
   river.appendChild(rightHalf);
   grid.appendChild(river);
 
-  // 九宫格斜线（SVG 叠加层）
+  // SVG 叠加层：网格线 + 九宫斜线 + 兵炮角标（矢量绘制，避免 DPR 1 子像素错位）
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('class', 'xiangqi-palace-diag');
   svg.setAttribute('viewBox', '0 0 9 10');
   svg.setAttribute('preserveAspectRatio', 'none');
+
+  // 坐标转换：逻辑 (r,c) → viewBox (vx,vy)，翻转时镜像
+  const vx = (c) => (xiangqiFlipped ? 8 - c : c) + 0.5;
+  const vy = (r) => (xiangqiFlipped ? 9 - r : r) + 0.5;
+
+  // 网格线
+  // 横线：10 条，y=r+0.5，从 x=0.5 到 x=8.5（左右边界）
+  for (let r = 0; r < 10; r++) {
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', 0.5);
+    line.setAttribute('y1', vy(r));
+    line.setAttribute('x2', 8.5);
+    line.setAttribute('y2', vy(r));
+    line.setAttribute('class', 'grid-line');
+    svg.appendChild(line);
+  }
+  // 竖线：9 条，x=c+0.5
+  // col 0/8（边界）从 y=0.5 到 y=9.5 连续；其余在河界处断开（y=0.5-4.5 + y=5.5-9.5）
+  for (let c = 0; c < 9; c++) {
+    const x = vx(c);
+    if (c === 0 || c === 8) {
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', x);
+      line.setAttribute('y1', 0.5);
+      line.setAttribute('x2', x);
+      line.setAttribute('y2', 9.5);
+      line.setAttribute('class', 'grid-line');
+      svg.appendChild(line);
+    } else {
+      // 上段（含黑方半场）
+      const up = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      up.setAttribute('x1', x);
+      up.setAttribute('y1', 0.5);
+      up.setAttribute('x2', x);
+      up.setAttribute('y2', vy(4));
+      up.setAttribute('class', 'grid-line');
+      svg.appendChild(up);
+      // 下段（含红方半场）
+      const down = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      down.setAttribute('x1', x);
+      down.setAttribute('y1', vy(5));
+      down.setAttribute('x2', x);
+      down.setAttribute('y2', 9.5);
+      down.setAttribute('class', 'grid-line');
+      svg.appendChild(down);
+    }
+  }
+
   const palaces = [
     { r1: 0, c1: 3, r2: 2, c2: 5 },
     { r1: 0, c1: 5, r2: 2, c2: 3 },
@@ -1197,14 +1222,10 @@ function buildXiangqiDOM(boardEl) {
   ];
   for (const p of palaces) {
     const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    const x1 = xiangqiFlipped ? 8 - p.c1 : p.c1;
-    const y1 = xiangqiFlipped ? 9 - p.r1 : p.r1;
-    const x2 = xiangqiFlipped ? 8 - p.c2 : p.c2;
-    const y2 = xiangqiFlipped ? 9 - p.r2 : p.r2;
-    line.setAttribute('x1', x1 + 0.5);
-    line.setAttribute('y1', y1 + 0.5);
-    line.setAttribute('x2', x2 + 0.5);
-    line.setAttribute('y2', y2 + 0.5);
+    line.setAttribute('x1', vx(p.c1) - 0.5);
+    line.setAttribute('y1', vy(p.r1) - 0.5);
+    line.setAttribute('x2', vx(p.c2) - 0.5);
+    line.setAttribute('y2', vy(p.r2) - 0.5);
     svg.appendChild(line);
   }
 
@@ -1218,13 +1239,9 @@ function buildXiangqiDOM(boardEl) {
   const G = 0.12;  // 角标内边距（viewBox 单位）
   const L = 0.22;  // 角标线长
   for (const { r, c } of markPoints) {
-    // 逻辑坐标 → viewBox 坐标（考虑翻转）
-    const vx = xiangqiFlipped ? 8 - c : c;
-    const vy = xiangqiFlipped ? 9 - r : r;
-    const cx = vx + 0.5, cy = vy + 0.5;
+    const cx = vx(c), cy = vy(r);
     const visualC = xiangqiFlipped ? 8 - c : c;
-    // 四个角：左上 (cx-G-L, cy-G)、右上 (cx+G+L, cy-G)、左下 (cx-G-L, cy+G)、右下 (cx+G+L, cy+G)
-    // 每个角两条短线：一条水平、一条垂直，组成 ⌐ 型
+    // 四个角：每个角两条短线（水平+垂直）组成 ⌐ 型；边界列只画内侧两角
     const corners = [];
     if (visualC !== 0) corners.push({ sx: cx - G - L, sy: cy - G, ex: cx - G, ey: cy - G, sx2: cx - G, sy2: cy - G - L, ex2: cx - G, ey2: cy - G }); // 左上
     if (visualC !== 8) corners.push({ sx: cx + G, sy: cy - G, ex: cx + G + L, ey: cy - G, sx2: cx + G, sy2: cy - G - L, ex2: cx + G, ey2: cy - G }); // 右上
