@@ -150,11 +150,11 @@ body {
 /* 网格线：每个格子的中心画十字交叉线 */
 .xiangqi-cell::before { content: ''; position: absolute; top: 50%; left: 0; right: 0; height: 1.5px; background: rgba(60,30,10,0.7); transform: translateY(-50%); }
 .xiangqi-cell::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1.5px; background: rgba(60,30,10,0.7); transform: translateX(-50%); }
-/* 边界格截断外侧线 */
-.xiangqi-cell.edge-top::before { top: 50%; } /* 顶行：水平线只在下半部分 */
-.xiangqi-cell.edge-bottom::before { bottom: 50%; top: 0; } /* 底行：水平线只在上半部分 */
-.xiangqi-cell.edge-left::after { left: 50%; } /* 左列：竖线只在右半部分 */
-.xiangqi-cell.edge-right::after { right: 50%; left: 0; } /* 右列：竖线只在左半部分 */
+/* 边界格截断外侧线：edge-top/bottom 截断垂直线(::after)，edge-left/right 截断水平线(::before) */
+.xiangqi-cell.edge-top::after { top: 50%; } /* 顶行：垂直线只在下半部分（上方无格子） */
+.xiangqi-cell.edge-bottom::after { bottom: 50%; } /* 底行：垂直线只在上半部分（下方无格子） */
+.xiangqi-cell.edge-left::before { left: 50%; } /* 左列：水平线只在右半部分（左方无格子） */
+.xiangqi-cell.edge-right::before { right: 50%; } /* 右列：水平线只在左半部分（右方无格子） */
 /* 楚河汉界 */
 .xiangqi-river { position: absolute; left: 0; right: 0; top: 45%; height: 10%; display: flex; align-items: center; justify-content: space-around; font-size: calc(var(--board-size) * 0.06); color: rgba(60,30,10,0.5); font-family: 'Ma Shan Zheng', 'STKaiti', 'KaiTi', serif; font-weight: 700; letter-spacing: 0.3em; pointer-events: none; z-index: 1; }
 .xiangqi-river span { display: inline-block; }
@@ -1108,8 +1108,6 @@ function renderXiangqi() {
 
   const rows = xiangqiFlipped ? [9,8,7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7,8,9];
   const cols = xiangqiFlipped ? [8,7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7,8];
-  const leftmostCol = xiangqiFlipped ? 8 : 0;
-  const bottomRow = xiangqiFlipped ? 0 : 9;
 
   for (const r of rows) {
     for (const c of cols) {
