@@ -539,7 +539,8 @@ export class Room {
   }
 
   handleRematchDecline(wsId) {
-    this.rematchVotes.delete(wsId);
+    // 拒绝意味着本次重赛协商终止：清空双方 vote，避免残留 vote 影响后续申请
+    this.rematchVotes.clear();
     for (const [id, c] of this.connections) {
       if (id !== wsId) {
         this.sendMessage(c.ws, { type: 'rematchDecline' });
