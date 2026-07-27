@@ -1196,6 +1196,42 @@ function onCellLeave(cell) {
   if (preview) preview.remove();
 }
 
+// 选中态增量更新：只切换 selected class 与走法标记(move-dot/capture-ring)，不重建棋盘。
+// 避免 onChessCellClick/sendChessMove 每次点击都 renderChess() 全量重建 64 格 DOM 的卡顿。
+function refreshChessSelection() {
+  document.querySelectorAll('.chess-cell.selected').forEach((el) => el.classList.remove('selected'));
+  document.querySelectorAll('.chess-cell .move-dot, .chess-cell .capture-ring').forEach((el) => el.remove());
+  if (chessSelected) {
+    const cell = getCell(chessSelected.r, chessSelected.c);
+    if (cell) cell.classList.add('selected');
+  }
+  for (const m of chessLegalMoves) {
+    const cell = getCell(m.to.r, m.to.c);
+    if (!cell) continue;
+    const piece = (chessBoardData && chessBoardData[m.to.r]) ? chessBoardData[m.to.r][m.to.c] : null;
+    const el = document.createElement('span');
+    el.className = piece ? 'capture-ring' : 'move-dot';
+    cell.appendChild(el);
+  }
+}
+
+function refreshXiangqiSelection() {
+  document.querySelectorAll('.xiangqi-cell.selected').forEach((el) => el.classList.remove('selected'));
+  document.querySelectorAll('.xiangqi-cell .move-dot, .xiangqi-cell .capture-ring').forEach((el) => el.remove());
+  if (xiangqiSelected) {
+    const cell = getCell(xiangqiSelected.r, xiangqiSelected.c);
+    if (cell) cell.classList.add('selected');
+  }
+  for (const m of xiangqiLegalMoves) {
+    const cell = getCell(m.to.r, m.to.c);
+    if (!cell) continue;
+    const piece = (xiangqiBoardData && xiangqiBoardData[m.to.r]) ? xiangqiBoardData[m.to.r][m.to.c] : null;
+    const el = document.createElement('span');
+    el.className = piece ? 'capture-ring' : 'move-dot';
+    cell.appendChild(el);
+  }
+}
+
 function renderChess() {
   const boardEl = document.getElementById('board');
   boardEl.innerHTML = '';
@@ -1301,12 +1337,12 @@ function onChessCellClick(r, c) {
     } catch {
       chessLegalMoves = [];
     }
-    renderChess();
+    refreshChessSelection();
   } else {
     // 点击空格或对方棋子（非目标）→ 取消选中
     chessSelected = null;
     chessLegalMoves = [];
-    renderChess();
+    refreshChessSelection();
   }
 }
 
@@ -1332,7 +1368,7 @@ function sendChessMove(move, promotionPiece) {
   ws.send(JSON.stringify(payload));
   chessSelected = null;
   chessLegalMoves = [];
-  renderChess();
+  refreshChessSelection();
 }
 
 // === 中国象棋渲染与交互 ===
@@ -1493,11 +1529,11 @@ function onXiangqiCellClick(r, c) {
     } catch {
       xiangqiLegalMoves = [];
     }
-    renderXiangqi();
+    refreshXiangqiSelection();
   } else {
     xiangqiSelected = null;
     xiangqiLegalMoves = [];
-    renderXiangqi();
+    refreshXiangqiSelection();
   }
 }
 
@@ -1507,7 +1543,7 @@ function sendXiangqiMove(move) {
   ws.send(JSON.stringify(payload));
   xiangqiSelected = null;
   xiangqiLegalMoves = [];
-  renderXiangqi();
+  refreshXiangqiSelection();
 }
 
 function colorLabel(color) {
