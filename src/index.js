@@ -285,6 +285,7 @@ body {
   <div class="button-row">
     <button class="btn" id="copyBtn" onclick="copyLink()">复制链接邀请好友</button>
     <button class="btn btn-secondary" id="waitBtn" onclick="sendWaitNotice()">等一会</button>
+    <button class="btn btn-secondary" id="drawBtn" onclick="requestDraw()">求和</button>
   </div>
 </div>
 
@@ -319,6 +320,19 @@ body {
 <div class="rematch-modal hidden" id="rematchWaiting">
   <div class="rematch-modal-text">等待对方同意...</div>
   <button class="btn btn-secondary" onclick="cancelRematch()">取消</button>
+</div>
+
+<div class="rematch-modal hidden" id="drawRequestModal">
+  <div class="rematch-modal-text">对方请求求和</div>
+  <div class="rematch-buttons">
+    <button class="btn" onclick="acceptDraw()">同意</button>
+    <button class="btn btn-secondary" onclick="declineDraw()">拒绝</button>
+  </div>
+</div>
+
+<div class="rematch-modal hidden" id="drawWaiting">
+  <div class="rematch-modal-text">等待对方回应求和...</div>
+  <button class="btn btn-secondary" onclick="cancelDraw()">取消</button>
 </div>
 
 <div class="promotion-modal hidden" id="promotionModal">
@@ -891,6 +905,7 @@ let gomokuFlipped = false;
 let lastMove = null;
 let checkColor = null;
 let rematchRole = null; // 'requester' | 'accepter' | null
+let drawRole = null; // 'requester' | 'accepter' | null（求和协商角色）
 let pendingPromotionMove = null;
 var waitAckReceived = false;
 
@@ -1634,6 +1649,8 @@ function hideAllModals() {
   document.getElementById('resultOverlay').classList.add('hidden');
   document.getElementById('rematchModal').classList.add('hidden');
   document.getElementById('rematchWaiting').classList.add('hidden');
+  document.getElementById('drawRequestModal').classList.add('hidden');
+  document.getElementById('drawWaiting').classList.add('hidden');
   document.getElementById('promotionModal').classList.add('hidden');
 }
 
@@ -1689,6 +1706,7 @@ function connect() {
         xiangqiState = null;
         checkColor = null;
         rematchRole = null;
+        drawRole = null;
         gameOver = false;
         draw = false;
         hideAllModals();
@@ -1798,6 +1816,9 @@ function connect() {
         draw = !!msg.draw;
         checkColor = null;
         renderBoard();
+        document.getElementById('drawWaiting').classList.add('hidden');
+        document.getElementById('drawRequestModal').classList.add('hidden');
+        drawRole = null;
         var overlay = document.getElementById('resultOverlay');
         overlay.classList.remove('hidden');
         var txt = document.getElementById('resultText');
@@ -1843,6 +1864,26 @@ function connect() {
         // 不依赖随后 colorAssign 触发 hideAllModals 的副作用。
         hideAllModals();
         rematchRole = null;
+        drawRole = null;
+        break;
+
+      case 'drawRequest':
+        // 对方请求求和：弹窗由我方选择同意/拒绝
+        drawRole = 'accepter';
+        document.getElementById('drawWaiting').classList.add('hidden');
+        document.getElementById('drawRequestModal').classList.remove('hidden');
+        break;
+
+      case 'drawDecline':
+        // 对方拒绝了求和 或 对方（请求方）取消了求和：关闭相关弹窗，对局继续
+        document.getElementById('drawWaiting').classList.add('hidden');
+        document.getElementById('drawRequestModal').classList.add('hidden');
+        if (drawRole === 'requester') {
+          setStatus('对方拒绝了求和请求');
+        } else if (drawRole === 'accepter') {
+          setStatus('对方取消了求和请求');
+        }
+        drawRole = null;
         break;
 
       case 'roomFull':
@@ -1851,10 +1892,13 @@ function connect() {
         break;
 
       case 'opponentLeft':
-        // 对手断线：若正在重赛协商中，隐藏重赛弹窗并回到结果界面，便于对手重连后重新发起
+        // 对手断线：若正在重赛/求和协商中，隐藏相关弹窗并回到结果界面，便于对手重连后重新发起
         document.getElementById('rematchWaiting').classList.add('hidden');
         document.getElementById('rematchModal').classList.add('hidden');
+        document.getElementById('drawWaiting').classList.add('hidden');
+        document.getElementById('drawRequestModal').classList.add('hidden');
         rematchRole = null;
+        drawRole = null;
         if (gameOver) {
           document.getElementById('resultOverlay').classList.remove('hidden');
         }
@@ -1924,6 +1968,35 @@ function cancelRematch() {
     document.getElementById('resultOverlay').classList.remove('hidden');
     rematchRole = null;
   }
+}
+
+// 求和：对局中任意一方可发起，对方同意则判和，拒绝/取消则继续对局
+function requestDraw() {
+  if (!ws || ws.readyState !== 1 || gameOver || drawRole || !myColor) return;
+  ws.send(JSON.stringify({ type: 'drawRequest' }));
+  drawRole = 'requester';
+  document.getElementById('drawWaiting').classList.remove('hidden');
+}
+
+function acceptDraw() {
+  if (!ws || ws.readyState !== 1 || drawRole !== 'accepter') return;
+  ws.send(JSON.stringify({ type: 'drawAccept' }));
+  document.getElementById('drawRequestModal').classList.add('hidden');
+  // 同意后等待服务端广播 gameOver（draw:true）
+}
+
+function declineDraw() {
+  if (!ws || ws.readyState !== 1 || drawRole !== 'accepter') return;
+  ws.send(JSON.stringify({ type: 'drawDecline' }));
+  document.getElementById('drawRequestModal').classList.add('hidden');
+  drawRole = null;
+}
+
+function cancelDraw() {
+  if (!ws || ws.readyState !== 1 || drawRole !== 'requester') return;
+  ws.send(JSON.stringify({ type: 'drawDecline' }));
+  document.getElementById('drawWaiting').classList.add('hidden');
+  drawRole = null;
 }
 
 function sendWaitNotice() {

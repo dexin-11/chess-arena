@@ -21,6 +21,7 @@ export class Room {
     this.whitePlayer = null;
     this.nextId = 0;
     this.rematchVotes = new Map(); // wsId -> gameType
+    this.drawOffered = null; // 求和请求方 wsId，null 表示无未处理求和
     this.lastStatusSnapshot = null; // 心跳状态去重用
     this._stateLoadPromise = null; // 防止并发重复加载 storage
   }
@@ -260,6 +261,18 @@ export class Room {
         this.handleRematchDecline(wsId);
         break;
 
+      case 'drawRequest':
+        this.handleDrawRequest(wsId);
+        break;
+
+      case 'drawAccept':
+        this.handleDrawAccept(wsId);
+        break;
+
+      case 'drawDecline':
+        this.handleDrawDecline(wsId);
+        break;
+
       case 'waitNotice':
         for (const [id, c] of this.connections) {
           if (id !== wsId) {
@@ -479,6 +492,8 @@ export class Room {
     this.connections.delete(wsId);
     // 一方断线则重赛协商无法继续，清空双方 vote，避免残留 vote 误导重连后的申请
     this.rematchVotes.clear();
+    // 断线时清除未处理求和，避免残留请求误导重连后的状态
+    this.drawOffered = null;
 
     if (this.connections.size === 0) {
       this.state.abort();
@@ -549,6 +564,58 @@ export class Room {
     }
   }
 
+  // 求和：仅在对局进行中且无未处理求和时接受。双方可同时发起，先到者记录为请求方，
+  // 后到者的 drawRequest 视为同意，直接判和。
+  handleDrawRequest(wsId) {
+    if (this.gameOver) return;
+    const conn = this.connections.get(wsId);
+    if (!conn) return;
+
+    // 对方已先发起求和：本次请求视为同意，直接判和
+    if (this.drawOffered !== null && this.drawOffered !== wsId) {
+      this.drawOffered = null;
+      this.gameOver = true;
+      this.draw = true;
+      this.winner = null;
+      this.broadcast({ type: 'gameOver', winner: null, draw: true });
+      this.persistState();
+      return;
+    }
+
+    // 本方发起求和：记录请求方，通知对方
+    if (this.drawOffered === null) {
+      this.drawOffered = wsId;
+      for (const [id, c] of this.connections) {
+        if (id !== wsId) {
+          this.sendMessage(c.ws, { type: 'drawRequest' });
+        }
+      }
+    }
+  }
+
+  handleDrawAccept(wsId) {
+    if (this.gameOver) return;
+    // 仅被请求方（非请求方本人）可同意
+    if (this.drawOffered === null || this.drawOffered === wsId) return;
+    this.drawOffered = null;
+    this.gameOver = true;
+    this.draw = true;
+    this.winner = null;
+    this.broadcast({ type: 'gameOver', winner: null, draw: true });
+    this.persistState();
+  }
+
+  handleDrawDecline(wsId) {
+    // 请求方取消 或 被请求方拒绝：清除未处理求和，通知对方
+    if (this.drawOffered === null) return;
+    this.drawOffered = null;
+    for (const [id, c] of this.connections) {
+      if (id !== wsId) {
+        this.sendMessage(c.ws, { type: 'drawDecline' });
+      }
+    }
+  }
+
   normalizeGameType(gt) {
     if (gt === 'chess') return 'chess';
     if (gt === 'xiangqi') return 'xiangqi';
@@ -572,6 +639,7 @@ export class Room {
     this.draw = false;
     this.lastMove = null;
     this.rematchVotes.clear();
+    this.drawOffered = null;
 
     // 显式通知双方重赛已开始：立即隐藏 rematchWaiting/rematchModal 等弹窗，
     // 不依赖随后 colorAssign 触发 hideAllModals 的副作用（colorAssign 在网络抖动/DO 重启时可能延迟或丢失）。
