@@ -103,9 +103,10 @@ body {
 .status-msg { font-size: 13px; color: var(--text-dim); min-height: 18px; text-align: center; letter-spacing: 0.5px; flex-shrink: 0; font-weight: 500; }
 .status-msg.check-msg { color: var(--bad); font-weight: 700; font-size: 14px; animation: checkPulse 1s ease-in-out infinite; }
 @keyframes checkPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
-/* 被吃子提示：自己的棋子被吃时在棋盘上方红字短暂显示 */
-.capture-msg { font-size: 14px; color: #ff6b6b; min-height: 0; max-height: 0; overflow: hidden; text-align: center; letter-spacing: 0.5px; font-weight: 700; flex-shrink: 0; transition: max-height 0.25s ease, opacity 0.25s ease; opacity: 0; }
-.capture-msg.show { max-height: 22px; opacity: 1; }
+/* 被吃子提示：自己的棋子被吃时在棋盘上方红字短暂显示。
+   预留固定高度（min-height），仅用 opacity/transform 显隐，不改变高度，避免挤压棋盘。*/
+.capture-msg { font-size: 14px; color: #ff6b6b; min-height: 20px; height: 20px; text-align: center; letter-spacing: 0.5px; font-weight: 700; flex-shrink: 0; line-height: 20px; opacity: 0; transform: translateY(4px); transition: opacity 0.25s ease, transform 0.25s ease; }
+.capture-msg.show { opacity: 1; transform: translateY(0); }
 .capture-msg .glyph { font-size: 16px; vertical-align: middle; }
 
 .board { position: relative; background: var(--board-wood); border-radius: 8px; padding: clamp(6px, 1.6vmin, 14px); box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.15); width: var(--board-size); height: var(--board-size); max-width: 100%; flex-shrink: 1; min-width: 0; }
