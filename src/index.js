@@ -10,7 +10,7 @@ const HOMEPAGE_HTML = `<!DOCTYPE html>
 <title>棋类对战</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Ma+Shan+Zheng&family=ZCOOL+XiaoWei&display=swap" rel="stylesheet">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'Sora', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: radial-gradient(ellipse 80% 60% at 50% -20%, rgba(233,69,96,0.12), transparent 60%), radial-gradient(ellipse 60% 80% at 100% 100%, rgba(15,52,96,0.4), transparent 70%), #0a0d1a; color: #eee; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
@@ -60,7 +60,7 @@ const GAME_HTML = `<!DOCTYPE html>
 <title>棋类对战</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Ma+Shan+Zheng&family=ZCOOL+XiaoWei&display=swap" rel="stylesheet">
 <style>
 :root {
   --bg-0: #0a0d1a; --bg-1: #131829; --bg-2: #1c2238;
@@ -144,9 +144,9 @@ body {
 .chess-cell.dark .coord { color: rgba(255,255,255,0.7); }
 
 /* 中国象棋棋盘 */
-.board.xiangqi { background: #E8C88C; padding: clamp(4px, 1.2vmin, 10px); border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.4); position: relative; aspect-ratio: 9 / 10; width: auto; height: var(--board-size); max-width: 100%; flex-shrink: 1; min-width: 0; }
-.xiangqi-grid { width: 100%; height: 100%; display: grid; grid-template-columns: repeat(9, 1fr); grid-template-rows: repeat(10, 1fr); gap: 0; position: relative; }
-.xiangqi-cell { width: 100%; height: 100%; position: relative; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.board.xiangqi { background: linear-gradient(135deg, #f0d9a4 0%, #e6c388 50%, #dcb380 100%); padding: clamp(4px, 1.2vmin, 10px); border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.4), inset 0 0 30px rgba(120,70,20,0.15); position: relative; aspect-ratio: 9 / 10; width: auto; height: var(--board-size); max-width: 100%; flex-shrink: 1; min-width: 0; }
+.xiangqi-grid { width: 100%; height: 100%; display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); grid-template-rows: repeat(10, minmax(0, 1fr)); gap: 0; position: relative; }
+.xiangqi-cell { width: 100%; height: 100%; position: relative; cursor: pointer; display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
 /* 网格线：每个格子的中心画十字交叉线 */
 .xiangqi-cell::before { content: ''; position: absolute; top: 50%; left: 0; right: 0; height: 1.5px; background: rgba(60,30,10,0.7); transform: translateY(-50%); }
 .xiangqi-cell::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1.5px; background: rgba(60,30,10,0.7); transform: translateX(-50%); }
@@ -156,20 +156,21 @@ body {
 .xiangqi-cell.edge-left::after { left: 50%; } /* 左列：竖线只在右半部分 */
 .xiangqi-cell.edge-right::after { right: 50%; left: 0; } /* 右列：竖线只在左半部分 */
 /* 楚河汉界 */
-.xiangqi-river { position: absolute; left: 0; right: 0; top: 40%; height: 20%; display: flex; align-items: center; justify-content: space-around; font-size: calc(var(--board-size) * 0.06); color: rgba(60,30,10,0.5); font-weight: 700; letter-spacing: 0.5em; pointer-events: none; z-index: 1; }
-/* 九宫格斜线 */
-.xiangqi-cell.palace-line-tr::before, .xiangqi-cell.palace-line-bl::before { background: transparent; }
-.xiangqi-palace-diag { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
-.xiangqi-palace-diag line { stroke: rgba(60,30,10,0.7); stroke-width: 1.5; }
-/* 棋子 */
-.xiangqi-cell .xpiece { position: relative; z-index: 3; width: 80%; height: 80%; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: calc(var(--board-size) * 0.05); font-family: 'Sora', 'Noto Sans SC', sans-serif; font-weight: 700; line-height: 1; box-shadow: 1px 2px 4px rgba(0,0,0,0.4), inset 0 -2px 4px rgba(0,0,0,0.2); transition: transform 0.15s ease; }
-.xiangqi-cell .xpiece.red { background: radial-gradient(circle at 35% 30%, #fff5e0, #f0d9b5 80%); color: #c0392b; border: 2px solid #c0392b; }
-.xiangqi-cell .xpiece.black { background: radial-gradient(circle at 35% 30%, #fff5e0, #f0d9b5 80%); color: #1a1a1a; border: 2px solid #1a1a1a; }
-.xiangqi-cell.selected .xpiece { transform: translateY(-1px) scale(1.06); box-shadow: 0 0 0 min(0.5vmin,5px) var(--accent), 1px 2px 6px rgba(0,0,0,0.5); }
-.xiangqi-cell.last-move::before { background: rgba(233,69,96,0.5); }
-.xiangqi-cell.check-king .xpiece { box-shadow: 0 0 0 min(0.5vmin,5px) #ff3333, 1px 2px 6px rgba(0,0,0,0.5); }
-.xiangqi-cell .move-dot { position: absolute; width: 28%; height: 28%; border-radius: 50%; background: rgba(60,30,10,0.3); pointer-events: none; z-index: 2; }
-.xiangqi-cell .capture-ring { position: absolute; inset: 8%; border: min(0.5vmin,5px) solid rgba(233,69,96,0.6); border-radius: 50%; box-sizing: border-box; pointer-events: none; z-index: 2; }
+.xiangqi-river { position: absolute; left: 0; right: 0; top: 45%; height: 10%; display: flex; align-items: center; justify-content: space-around; font-size: calc(var(--board-size) * 0.06); color: rgba(60,30,10,0.5); font-family: 'Ma Shan Zheng', 'STKaiti', 'KaiTi', serif; font-weight: 700; letter-spacing: 0.3em; pointer-events: none; z-index: 1; }
+.xiangqi-river span { display: inline-block; }
+/* 九宫格斜线（SVG 叠加层，stroke-width 用 viewBox 单位的细值，避免被放大成粗矩形） */
+.xiangqi-palace-diag { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; overflow: visible; }
+.xiangqi-palace-diag line { stroke: rgba(60,30,10,0.7); stroke-width: 0.04; stroke-linecap: round; }
+/* 棋子：木质浮雕硬币风格 */
+.xiangqi-cell .xpiece { position: relative; z-index: 3; width: 86%; height: 86%; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: calc(var(--board-size) * 0.062); font-family: 'Ma Shan Zheng', 'ZCOOL XiaoWei', 'STKaiti', 'KaiTi', 'Noto Serif SC', serif; font-weight: 700; line-height: 1; background: radial-gradient(circle at 32% 26%, #fff8e3 0%, #f4dba2 55%, #d4a76a 100%); box-shadow: 0 2px 5px rgba(60,30,10,0.45), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); transition: transform 0.15s ease; }
+.xiangqi-cell .xpiece::before { content: ''; position: absolute; inset: 7%; border-radius: 50%; border: 1.5px solid currentColor; opacity: 0.45; pointer-events: none; }
+.xiangqi-cell .xpiece.red { color: #b91c1c; border: 2px solid #7f1d1d; text-shadow: 0 1px 0 rgba(255,250,235,0.5); }
+.xiangqi-cell .xpiece.black { color: #1f1f1f; border: 2px solid #0a0a0a; text-shadow: 0 1px 0 rgba(255,250,235,0.4); }
+.xiangqi-cell.selected .xpiece { transform: translateY(-1px) scale(1.06); box-shadow: 0 0 0 min(0.5vmin,5px) var(--accent), 0 3px 7px rgba(60,30,10,0.5), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); }
+.xiangqi-cell.last-move::before { background: rgba(233,69,96,0.45); }
+.xiangqi-cell.check-king .xpiece { box-shadow: 0 0 0 min(0.5vmin,5px) #ff3333, 0 3px 7px rgba(60,30,10,0.5), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); }
+.xiangqi-cell .move-dot { position: absolute; width: 26%; height: 26%; border-radius: 50%; background: rgba(60,30,10,0.3); pointer-events: none; z-index: 2; }
+.xiangqi-cell .capture-ring { position: absolute; inset: 7%; border: min(0.5vmin,5px) solid rgba(233,69,96,0.6); border-radius: 50%; box-sizing: border-box; pointer-events: none; z-index: 2; }
 
 .btn { padding: 8px 14px; border: none; border-radius: 8px; font-size: 13px; font-family: 'Sora', sans-serif; font-weight: 600; cursor: pointer; background: var(--accent); color: #fff; transition: background 0.2s, transform 0.1s; letter-spacing: 0.3px; }
 .btn:hover { background: #c73650; }
@@ -1164,7 +1165,12 @@ function renderXiangqi() {
   // 楚河汉界
   const river = document.createElement('div');
   river.className = 'xiangqi-river';
-  river.textContent = '楚 河          汉 界';
+  const leftHalf = document.createElement('span');
+  leftHalf.textContent = '楚 河';
+  const rightHalf = document.createElement('span');
+  rightHalf.textContent = '汉 界';
+  river.appendChild(leftHalf);
+  river.appendChild(rightHalf);
   grid.appendChild(river);
 
   // 九宫格斜线（SVG 叠加层）
