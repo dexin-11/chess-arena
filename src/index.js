@@ -103,6 +103,10 @@ body {
 .status-msg { font-size: 13px; color: var(--text-dim); min-height: 18px; text-align: center; letter-spacing: 0.5px; flex-shrink: 0; font-weight: 500; }
 .status-msg.check-msg { color: var(--bad); font-weight: 700; font-size: 14px; animation: checkPulse 1s ease-in-out infinite; }
 @keyframes checkPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+/* 被吃子提示：自己的棋子被吃时在棋盘上方红字短暂显示 */
+.capture-msg { font-size: 14px; color: #ff6b6b; min-height: 0; max-height: 0; overflow: hidden; text-align: center; letter-spacing: 0.5px; font-weight: 700; flex-shrink: 0; transition: max-height 0.25s ease, opacity 0.25s ease; opacity: 0; }
+.capture-msg.show { max-height: 22px; opacity: 1; }
+.capture-msg .glyph { font-size: 16px; vertical-align: middle; }
 
 .board { position: relative; background: var(--board-wood); border-radius: 8px; padding: clamp(6px, 1.6vmin, 14px); box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.15); width: var(--board-size); height: var(--board-size); max-width: 100%; flex-shrink: 1; min-width: 0; }
 .board.chess { background: transparent; padding: 0; overflow: hidden; border-radius: 6px; box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.4); }
@@ -272,6 +276,7 @@ body {
 
 <div class="board-container">
   <div class="status-msg" id="statusMsg"></div>
+  <div class="capture-msg" id="captureMsg"></div>
   <div class="board" id="board"></div>
   <div class="button-row">
     <button class="btn" id="copyBtn" onclick="copyLink()">复制链接邀请好友</button>
@@ -1553,6 +1558,29 @@ function setStatus(msg, isCheck) {
   if (isCheck) el.classList.add('check-msg'); else el.classList.remove('check-msg');
 }
 
+// 国际象棋棋子中文名（中国象棋直接用 XIANGQI_GLYPHS 字符）
+const CHESS_PIECE_NAMES = { k:'王', q:'后', r:'车', b:'象', n:'马', p:'兵' };
+let captureMsgTimer = null;
+// 被吃子提示：当自己的棋子被吃时，在棋盘上方红字显示"对方吃了你的[棋子]"
+function showCaptureNotice(captured) {
+  if (!captured || !myColor || captured.color !== myColor) return;
+  const el = document.getElementById('captureMsg');
+  let name;
+  if (gameType === 'chess') {
+    name = CHESS_PIECE_NAMES[captured.type] || '?';
+  } else {
+    // 中国象棋：直接用对应方棋子字符（如红方被吃用"车"等）
+    name = (XIANGQI_GLYPHS[captured.color] && XIANGQI_GLYPHS[captured.color][captured.type]) || '?';
+  }
+  el.textContent = '对方吃了你的 ' + name;
+  el.classList.add('show');
+  if (captureMsgTimer) clearTimeout(captureMsgTimer);
+  captureMsgTimer = setTimeout(() => {
+    el.classList.remove('show');
+    captureMsgTimer = null;
+  }, 3500);
+}
+
 function setRematchSelectDefaults() {
   document.getElementById('rematchGameSelect').value = gameType;
   document.getElementById('rematchHint').textContent = '';
@@ -1674,6 +1702,7 @@ function connect() {
           chessSelected = null;
           chessLegalMoves = [];
           renderChessMove(msg.from, msg.to, msg.special);
+          showCaptureNotice(msg.captured);
         } else if (gameType === 'xiangqi') {
           const move = { from: msg.from, to: msg.to };
           const result = Xiangqi.applyMove(xiangqiBoardData, move, xiangqiState);
@@ -1687,6 +1716,7 @@ function connect() {
           xiangqiSelected = null;
           xiangqiLegalMoves = [];
           renderXiangqiMove(msg.from, msg.to);
+          showCaptureNotice(msg.captured);
         } else {
           // 五子棋
           boardData[msg.row][msg.col] = msg.color;
