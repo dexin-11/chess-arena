@@ -144,20 +144,25 @@ body {
 .chess-cell.dark .coord { color: rgba(255,255,255,0.7); }
 
 /* 中国象棋棋盘 */
-.board.xiangqi { background: linear-gradient(135deg, #f0d9a4 0%, #e6c388 50%, #dcb380 100%); padding: clamp(4px, 1.2vmin, 10px); border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.4), inset 0 0 30px rgba(120,70,20,0.15); position: relative; aspect-ratio: 9 / 10; width: auto; height: var(--board-size); max-width: 100%; flex-shrink: 1; min-width: 0; }
-.xiangqi-grid { width: 100%; height: 100%; display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); grid-template-rows: repeat(10, minmax(0, 1fr)); gap: 0; position: relative; }
+/* 中国象棋棋盘：标准比例 9:10（宽:高）。padding 用 box-sizing:border-box
+   含在整体尺寸内，aspect-ratio 作用于 border-box，保证整体 9:10 不变形；
+   内部 grid 占满 content box，10 行均匀 1fr，避免底部行被 padding 挤压。 */
+.board.xiangqi { box-sizing: border-box; background: linear-gradient(135deg, #f0d9a4 0%, #e6c388 50%, #dcb380 100%); padding: clamp(4px, 1.2vmin, 10px); border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.4), inset 0 0 30px rgba(120,70,20,0.15); position: relative; aspect-ratio: 9 / 10; width: auto; height: var(--board-size); max-width: 100%; flex-shrink: 1; min-width: 0; }
+.xiangqi-grid { box-sizing: border-box; width: 100%; height: 100%; display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); grid-template-rows: repeat(10, minmax(0, 1fr)); gap: 0; position: relative; }
 .xiangqi-cell { width: 100%; height: 100%; position: relative; cursor: pointer; display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
 /* 网格线：每个格子的中心画十字交叉线 */
 .xiangqi-cell::before { content: ''; position: absolute; top: 50%; left: 0; right: 0; height: 1.5px; background: rgba(60,30,10,0.7); transform: translateY(-50%); }
 .xiangqi-cell::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1.5px; background: rgba(60,30,10,0.7); transform: translateX(-50%); }
-/* 边界格截断外侧线 */
-.xiangqi-cell.edge-top::before { top: 50%; } /* 顶行：水平线只在下半部分 */
-.xiangqi-cell.edge-bottom::before { bottom: 50%; top: 0; } /* 底行：水平线只在上半部分 */
-.xiangqi-cell.edge-left::after { left: 50%; } /* 左列：竖线只在右半部分 */
-.xiangqi-cell.edge-right::after { right: 50%; left: 0; } /* 右列：竖线只在左半部分 */
-/* 楚河汉界：第5、6横线之间竖线断开（标准象棋棋盘河界处9条纵线中断） */
-.xiangqi-cell.river-top::after { bottom: 50%; } /* 楚河汉界上边行（visualR=4）：竖线只在上半部分 */
-.xiangqi-cell.river-bottom::after { top: 50%; } /* 楚河汉界下边行（visualR=5）：竖线只在下半部分 */
+/* 边界格截断外侧线：覆盖 top/bottom/left/right 范围，保留 transform 居中。
+   仅缩窄绘制范围，不改变线的居中位置，避免错位。 */
+.xiangqi-cell.edge-top::before { top: 50%; bottom: auto; } /* 顶行：水平线只在下半部分（中线到格子底） */
+.xiangqi-cell.edge-bottom::before { top: auto; bottom: 50%; } /* 底行：水平线只在上半部分（格子顶到中线） */
+.xiangqi-cell.edge-left::after { left: 50%; right: auto; } /* 左列：竖线只在右半部分（中线到格子右） */
+.xiangqi-cell.edge-right::after { left: auto; right: 50%; } /* 右列：竖线只在左半部分（格子左到中线） */
+/* 楚河汉界：第5、6横线之间竖线断开（标准象棋棋盘河界处9条纵线中断）。
+   river-top 行竖线只画上半，river-bottom 行竖线只画下半。 */
+.xiangqi-cell.river-top::after { top: 0; bottom: 50%; }
+.xiangqi-cell.river-bottom::after { top: 50%; bottom: 0; }
 /* 楚河汉界 */
 .xiangqi-river { position: absolute; left: 0; right: 0; top: 45%; height: 10%; display: flex; align-items: center; justify-content: space-around; font-size: calc(var(--board-size) * 0.06); color: rgba(60,30,10,0.5); font-family: 'Ma Shan Zheng', 'STKaiti', 'KaiTi', serif; font-weight: 700; letter-spacing: 0.3em; pointer-events: none; z-index: 1; }
 .xiangqi-river span { display: inline-block; }
