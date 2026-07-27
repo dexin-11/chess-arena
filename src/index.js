@@ -162,14 +162,19 @@ body {
 .xiangqi-palace-diag { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; overflow: visible; }
 .xiangqi-palace-diag line { stroke: rgba(60,30,10,0.7); stroke-width: 0.04; stroke-linecap: round; }
 /* 棋子：木质浮雕硬币风格 */
-.xiangqi-cell .xpiece { position: relative; z-index: 3; width: 86%; height: 86%; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: calc(var(--board-size) * 0.062); font-family: 'Ma Shan Zheng', 'ZCOOL XiaoWei', 'STKaiti', 'KaiTi', 'Noto Serif SC', serif; font-weight: 700; line-height: 1; background: radial-gradient(circle at 32% 26%, #fff8e3 0%, #f4dba2 55%, #d4a76a 100%); box-shadow: 0 2px 5px rgba(60,30,10,0.45), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); transition: transform 0.15s ease; }
+.xiangqi-cell .xpiece { position: relative; z-index: 3; width: 86%; height: 86%; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: calc(var(--board-size) * 0.062); font-family: 'Ma Shan Zheng', 'ZCOOL XiaoWei', 'STKaiti', 'KaiTi', 'Noto Serif SC', serif; font-weight: 700; line-height: 1; background: radial-gradient(circle at 32% 26%, #fff8e3 0%, #f4dba2 55%, #d4a76a 100%); box-shadow: 0 2px 5px rgba(60,30,10,0.45), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); transition: transform 0.15s ease; will-change: transform; }
 .xiangqi-cell .xpiece::before { content: ''; position: absolute; inset: 7%; border-radius: 50%; border: 1.5px solid currentColor; opacity: 0.45; pointer-events: none; }
 .xiangqi-cell .xpiece.red { color: #b91c1c; border: 2px solid #7f1d1d; text-shadow: 0 1px 0 rgba(255,250,235,0.5); }
 .xiangqi-cell .xpiece.black { color: #1f1f1f; border: 2px solid #0a0a0a; text-shadow: 0 1px 0 rgba(255,250,235,0.4); }
 .xiangqi-cell.selected .xpiece { transform: translateY(-1px) scale(1.06); box-shadow: 0 0 0 min(0.5vmin,5px) var(--accent), 0 3px 7px rgba(60,30,10,0.5), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); }
 .xiangqi-cell.last-move::before { background: rgba(233,69,96,0.45); }
 .xiangqi-cell.check-king .xpiece { box-shadow: 0 0 0 min(0.5vmin,5px) #ff3333, 0 3px 7px rgba(60,30,10,0.5), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); }
-.xiangqi-cell .move-dot { position: absolute; width: 26%; height: 26%; border-radius: 50%; background: rgba(60,30,10,0.3); pointer-events: none; z-index: 2; }
+/* 走法提示：move-hint 容器复用，子类区分空格点/吃子环 */
+.xiangqi-cell .move-hint { position: absolute; pointer-events: none; z-index: 2; }
+.xiangqi-cell .move-hint.move-dot { width: 26%; height: 26%; border-radius: 50%; background: rgba(60,30,10,0.3); left: 50%; top: 50%; transform: translate(-50%, -50%); }
+.xiangqi-cell .move-hint.capture-ring { inset: 7%; border: min(0.5vmin,5px) solid rgba(233,69,96,0.6); border-radius: 50%; box-sizing: border-box; }
+/* 兼容旧直接类名（以防其他位置直接用 move-dot/capture-ring） */
+.xiangqi-cell .move-dot { position: absolute; width: 26%; height: 26%; border-radius: 50%; background: rgba(60,30,10,0.3); pointer-events: none; z-index: 2; left: 50%; top: 50%; transform: translate(-50%, -50%); }
 .xiangqi-cell .capture-ring { position: absolute; inset: 7%; border: min(0.5vmin,5px) solid rgba(233,69,96,0.6); border-radius: 50%; box-sizing: border-box; pointer-events: none; z-index: 2; }
 
 .btn { padding: 8px 14px; border: none; border-radius: 8px; font-size: 13px; font-family: 'Sora', sans-serif; font-weight: 600; cursor: pointer; background: var(--accent); color: #fff; transition: background 0.2s, transform 0.1s; letter-spacing: 0.3px; }
@@ -852,6 +857,7 @@ let xiangqiState = null;
 let xiangqiSelected = null;
 let xiangqiLegalMoves = [];
 let xiangqiFlipped = false;
+let xiangqiCellRefs = null; // 缓存 90 个 cell DOM 引用，避免每次 render 全量重建
 let lastMove = null;
 let checkColor = null;
 let rematchRole = null; // 'requester' | 'accepter' | null
@@ -884,6 +890,8 @@ function init() {
 function buildBoard() {
   const boardEl = document.getElementById('board');
   boardEl.innerHTML = '';
+  // 切换棋种/重建时清空中国象棋 DOM 缓存，强制重新构建
+  xiangqiCellRefs = null;
   if (gameType === 'chess') {
     boardEl.className = 'board chess';
     renderChess();
@@ -1100,16 +1108,28 @@ function sendChessMove(move, promotionPiece) {
 }
 
 // === 中国象棋渲染与交互 ===
+// 为降低走棋卡顿，DOM 只在首次/翻转/重建时构建一次，
+// 后续选中/取消选中只更新 cell 的 class 与子元素，避免 90 个节点全量重建。
 function renderXiangqi() {
   const boardEl = document.getElementById('board');
+  const needRebuild = !xiangqiCellRefs || boardEl.querySelector('.xiangqi-grid') !== xiangqiCellRefs._grid;
+  if (needRebuild) buildXiangqiDOM(boardEl);
+  updateXiangqiCells();
+}
+
+// 首次构建棋盘 DOM：grid + 90 cell + 楚河汉界 + 九宫斜线 SVG。
+// cell 引用缓存到 xiangqiCellRefs[r][c]，事件委托到 grid 上，避免 90 个 listener。
+function buildXiangqiDOM(boardEl) {
   boardEl.innerHTML = '';
   const grid = document.createElement('div');
   grid.className = 'xiangqi-grid';
 
+  xiangqiCellRefs = { _grid: grid };
   const rows = xiangqiFlipped ? [9,8,7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7,8,9];
   const cols = xiangqiFlipped ? [8,7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7,8];
 
   for (const r of rows) {
+    xiangqiCellRefs[r] = {};
     for (const c of cols) {
       const cell = document.createElement('div');
       cell.className = 'xiangqi-cell';
@@ -1124,38 +1144,18 @@ function renderXiangqi() {
       if (visualC === 0) cell.classList.add('edge-left');
       if (visualC === 8) cell.classList.add('edge-right');
 
-      const piece = (xiangqiBoardData && xiangqiBoardData[r]) ? xiangqiBoardData[r][c] : null;
-      if (piece && XIANGQI_GLYPHS[piece.color] && XIANGQI_GLYPHS[piece.color][piece.type]) {
-        const span = document.createElement('span');
-        span.className = 'xpiece ' + piece.color;
-        span.textContent = XIANGQI_GLYPHS[piece.color][piece.type];
-        cell.appendChild(span);
-      }
+      // 棋子容器（固定占位，更新时只改内容）
+      const pieceSpan = document.createElement('span');
+      pieceSpan.className = 'xpiece';
+      pieceSpan.style.display = 'none';
+      cell.appendChild(pieceSpan);
+      // 走法提示容器
+      const hintSpan = document.createElement('span');
+      hintSpan.className = 'move-hint';
+      hintSpan.style.display = 'none';
+      cell.appendChild(hintSpan);
 
-      if (xiangqiSelected && xiangqiSelected.r === r && xiangqiSelected.c === c) {
-        cell.classList.add('selected');
-      }
-      if (lastMove && ((lastMove.from.r === r && lastMove.from.c === c) || (lastMove.to.r === r && lastMove.to.c === c))) {
-        cell.classList.add('last-move');
-      }
-      if (checkColor && piece && piece.type === 'k' && piece.color === checkColor) {
-        cell.classList.add('check-king');
-      }
-
-      const moveTo = xiangqiLegalMoves.find(m => m.to.r === r && m.to.c === c);
-      if (moveTo) {
-        if (piece) {
-          const ring = document.createElement('span');
-          ring.className = 'capture-ring';
-          cell.appendChild(ring);
-        } else {
-          const dot = document.createElement('span');
-          dot.className = 'move-dot';
-          cell.appendChild(dot);
-        }
-      }
-
-      cell.addEventListener('click', () => onXiangqiCellClick(r, c));
+      xiangqiCellRefs[r][c] = { cell, piece: pieceSpan, hint: hintSpan };
       grid.appendChild(cell);
     }
   }
@@ -1176,9 +1176,6 @@ function renderXiangqi() {
   svg.setAttribute('class', 'xiangqi-palace-diag');
   svg.setAttribute('viewBox', '0 0 9 10');
   svg.setAttribute('preserveAspectRatio', 'none');
-  // 黑方九宫格 (row 0-2, col 3-5): 对角线 (0,3)-(2,5) 和 (0,5)-(2,3)
-  // 红方九宫格 (row 7-9, col 3-5): 对角线 (7,3)-(9,5) 和 (7,5)-(9,3)
-  // col 映射到 viewBox: 不翻转时 col 直接用；翻转时需映射
   const palaces = [
     { r1: 0, c1: 3, r2: 2, c2: 5 },
     { r1: 0, c1: 5, r2: 2, c2: 3 },
@@ -1199,7 +1196,70 @@ function renderXiangqi() {
   }
   grid.appendChild(svg);
 
+  // 事件委托：单个 listener 处理所有 cell 点击，避免 90 个闭包
+  grid.addEventListener('click', (e) => {
+    const cell = e.target.closest('.xiangqi-cell');
+    if (!cell || !grid.contains(cell)) return;
+    const r = +cell.dataset.row;
+    const c = +cell.dataset.col;
+    onXiangqiCellClick(r, c);
+  });
+
   boardEl.appendChild(grid);
+}
+
+// 增量更新：仅修改 class 与子元素内容，不重建 DOM。
+function updateXiangqiCells() {
+  if (!xiangqiCellRefs) return;
+  const legalByTo = new Map();
+  for (const m of xiangqiLegalMoves) {
+    legalByTo.set(m.to.r + ',' + m.to.c, m);
+  }
+  const lastFromKey = lastMove ? lastMove.from.r + ',' + lastMove.from.c : null;
+  const lastToKey = lastMove ? lastMove.to.r + ',' + lastMove.to.c : null;
+  const selKey = xiangqiSelected ? xiangqiSelected.r + ',' + xiangqiSelected.c : null;
+
+  for (let r = 0; r < 10; r++) {
+    const row = xiangqiCellRefs[r];
+    if (!row) continue;
+    for (let c = 0; c < 9; c++) {
+      const ref = row[c];
+      if (!ref) continue;
+      const piece = (xiangqiBoardData && xiangqiBoardData[r]) ? xiangqiBoardData[r][c] : null;
+      const key = r + ',' + c;
+
+      // 棋子内容
+      const pieceEl = ref.piece;
+      if (piece && XIANGQI_GLYPHS[piece.color] && XIANGQI_GLYPHS[piece.color][piece.type]) {
+        const glyph = XIANGQI_GLYPHS[piece.color][piece.type];
+        if (pieceEl.textContent !== glyph || pieceEl.className !== 'xpiece ' + piece.color) {
+          pieceEl.className = 'xpiece ' + piece.color;
+          pieceEl.textContent = glyph;
+        }
+        pieceEl.style.display = '';
+      } else {
+        if (pieceEl.style.display !== 'none') pieceEl.style.display = 'none';
+        pieceEl.textContent = '';
+      }
+
+      // 走法提示
+      const move = legalByTo.get(key);
+      const hintEl = ref.hint;
+      if (move) {
+        const wantClass = piece ? 'move-hint capture-ring' : 'move-hint move-dot';
+        if (hintEl.className !== wantClass) hintEl.className = wantClass;
+        if (hintEl.style.display !== '') hintEl.style.display = '';
+      } else {
+        if (hintEl.style.display !== 'none') hintEl.style.display = 'none';
+      }
+
+      // class 增量
+      const cell = ref.cell;
+      cell.classList.toggle('selected', key === selKey);
+      cell.classList.toggle('last-move', key === lastFromKey || key === lastToKey);
+      cell.classList.toggle('check-king', !!(checkColor && piece && piece.type === 'k' && piece.color === checkColor));
+    }
+  }
 }
 
 function onXiangqiCellClick(r, c) {
@@ -1338,8 +1398,9 @@ function connect() {
         updateStatus(msg);
         break;
 
-      case 'colorAssign':
+      case 'colorAssign': {
         myColor = msg.you;
+        const prevXiangqiFlipped = xiangqiFlipped;
         if (msg.gameType && msg.gameType !== gameType) {
           gameType = msg.gameType;
           buildBoard();
@@ -1348,6 +1409,10 @@ function connect() {
         }
         chessFlipped = (gameType === 'chess' && myColor === 'black');
         xiangqiFlipped = (gameType === 'xiangqi' && myColor === 'black');
+        // 翻转状态变化（如再来一局换边）需重建 DOM 以重排行列顺序与边界 class
+        if (gameType === 'xiangqi' && prevXiangqiFlipped !== xiangqiFlipped) {
+          buildBoard();
+        }
         chessSelected = null;
         chessLegalMoves = [];
         chessState = null;
@@ -1363,6 +1428,7 @@ function connect() {
         setStatus('');
         updateHeader();
         break;
+      }
 
       case 'sync':
         if (msg.gameType && msg.gameType !== gameType) {
