@@ -303,6 +303,7 @@ export function applyMove(board, move, state, promotionPiece) {
 }
 
 // 生成合法走法：过滤走完后己方王被将军的走法；易位额外校验路径格不被攻击。
+// 内部使用 make/unmake 在原棋盘上模拟，避免每个伪合法走法都 cloneBoard。
 export function getLegalMoves(board, r, c, state) {
   const piece = board[r][c];
   if (!piece) return [];
@@ -322,111 +323,136 @@ export function getLegalMoves(board, r, c, state) {
       if (isSquareAttacked(board, row, midC, opponent)) continue;
       if (isSquareAttacked(board, row, endC, opponent)) continue;
     }
-    // 模拟走完后己方王不能处于将军
-    const { board: next } = applyMove(board, move, state);
-    if (!isInCheck(next, color)) legal.push(move);
+    // make/unmake：在原棋盘上施加走法 → 检查己方王是否被将军 → 还原
+    const undo = makeMove(board, move);
+    if (!isInCheck(board, color)) legal.push(move);
+    unmakeMove(board, move, undo);
   }
 
   return legal;
 }
 
-// 判断 color 方是否还有任意合法走法（用于将杀/逼和判定）。
-// 用 make/unmake 原地走法替代 cloneBoard，仅服务端将杀/逼和判定路径使用。
-// 语义与原 getLegalMoves 版完全一致（含易位额外校验、promotion 按 'q' 升变）。
-function makeMoveInPlace(board, move) {
-  const from = move.from, to = move.to;
-  const piece = board[from.r][from.c];
+// 单步走法校验：仅校验客户端提交的 from/to/special 是否合法。
+// 比先 getLegalMoves 再 find 快一个数量级（只做 1 次 applyMove + isInCheck）。
+// 返回 { legal: boolean, move? }。
+export function isLegalMove(board, fromR, fromC, toR, toC, state, special, promotionPiece) {
+  const piece = board[fromR] && board[fromR][fromC];
+  if (!piece) return { legal: false };
   const color = piece.color;
-  const undo = {
-    piece,            // 原棋子（promotion 时仍为 pawn）
-    captured: null,   // 目标格原棋子
-    enPassantCap: null, // 过路兵被吃位置与原值
-    castleRook: null,   // 易位时车移动信息
-  };
-  if (move.special === 'enpassant') {
-    undo.enPassantCap = { r: from.r, c: to.c, piece: board[from.r][to.c] };
-    board[from.r][to.c] = null;
-  } else {
-    undo.captured = board[to.r][to.c];
+  const opponent = opposite(color);
+  const pseudo = getPseudoLegalMoves(board, fromR, fromC, state);
+
+  // 先按 from/to/special 精确匹配；找不到再按 from/to 兜底（客户端可能省略 special）
+  let matched = pseudo.find(
+    (m) => m.to.r === toR && m.to.c === toC && (m.special || null) === (special || null)
+  );
+  if (!matched) {
+    matched = pseudo.find((m) => m.to.r === toR && m.to.c === toC);
   }
+  if (!matched) return { legal: false };
+
+  // 易位路径攻击校验（与 getLegalMoves 保持一致）
+  if (matched.special === 'castle-kingside' || matched.special === 'castle-queenside') {
+    const row = matched.from.r;
+    const startC = 4;
+    const midC = matched.special === 'castle-kingside' ? 5 : 3;
+    const endC = matched.special === 'castle-kingside' ? 6 : 2;
+    if (isSquareAttacked(board, row, startC, opponent)) return { legal: false };
+    if (isSquareAttacked(board, row, midC, opponent)) return { legal: false };
+    if (isSquareAttacked(board, row, endC, opponent)) return { legal: false };
+  }
+
+  // 单次 applyMove + isInCheck
+  const { board: next } = applyMove(board, matched, state, promotionPiece);
+  if (isInCheck(next, color)) return { legal: false };
+  return { legal: true, move: matched };
+}
+
+// 在原棋盘上施加走法（不分配新棋盘）。返回 undo 信息供 unmakeMove 还原。
+// 仅修改棋盘几何，不更新易位权/过路兵目标（isInCheck 不依赖这些）。
+// 升变时不替换棋子类型——本方王安全只依赖棋子位置，与升变后类型无关。
+function makeMove(board, move) {
+  const fromR = move.from.r, fromC = move.from.c;
+  const toR = move.to.r, toC = move.to.c;
+  const piece = board[fromR][fromC];
+  let captured = null;
+  let enPassantPawn = null;
+  let castleRookTo = null; // 易位时车的目标格原值（应为 null）
+
+  if (move.special === 'enpassant') {
+    enPassantPawn = board[fromR][toC]; // 被吃的兵
+    board[fromR][toC] = null;
+  } else {
+    captured = board[toR][toC];
+  }
+
+  board[toR][toC] = piece;
+  board[fromR][fromC] = null;
+
   if (move.special === 'castle-kingside') {
-    const row = from.r;
-    undo.castleRook = { fromR: row, fromC: 7, toR: row, toC: 5, piece: board[row][7] };
+    const row = fromR;
+    castleRookTo = board[row][5];
     board[row][5] = board[row][7];
     board[row][7] = null;
   } else if (move.special === 'castle-queenside') {
-    const row = from.r;
-    undo.castleRook = { fromR: row, fromC: 0, toR: row, toC: 3, piece: board[row][0] };
+    const row = fromR;
+    castleRookTo = board[row][3];
     board[row][3] = board[row][0];
     board[row][0] = null;
   }
-  if (move.special === 'promotion') {
-    board[to.r][to.c] = { type: 'q', color };
-  } else {
-    board[to.r][to.c] = piece;
-  }
-  board[from.r][from.c] = null;
-  return undo;
+
+  return { piece, captured, enPassantPawn, castleRookTo };
 }
 
+// 还原 makeMove 的修改，按相反顺序恢复各格。
 function unmakeMove(board, move, undo) {
-  const from = move.from, to = move.to;
-  // 还原原棋子到起点（promotion 时还原为原 pawn）
-  board[from.r][from.c] = undo.piece;
-  // 还原目标格
-  if (move.special === 'enpassant') {
-    board[to.r][to.c] = null;
-    board[undo.enPassantCap.r][undo.enPassantCap.c] = undo.enPassantCap.piece;
-  } else {
-    board[to.r][to.c] = undo.captured;
+  const fromR = move.from.r, fromC = move.from.c;
+  const toR = move.to.r, toC = move.to.c;
+
+  // 先还原易位车
+  if (move.special === 'castle-kingside') {
+    const row = fromR;
+    board[row][7] = board[row][5];
+    board[row][5] = undo.castleRookTo;
+  } else if (move.special === 'castle-queenside') {
+    const row = fromR;
+    board[row][0] = board[row][3];
+    board[row][3] = undo.castleRookTo;
   }
-  // 还原易位时的车
-  if (undo.castleRook) {
-    board[undo.castleRook.fromR][undo.castleRook.fromC] = undo.castleRook.piece;
-    board[undo.castleRook.toR][undo.castleRook.toC] = null;
+
+  // 还原 from / to
+  board[fromR][fromC] = undo.piece;
+  board[toR][toC] = undo.captured; // enpassant 时为 null
+
+  // 还原过路兵被吃格
+  if (move.special === 'enpassant') {
+    board[fromR][toC] = undo.enPassantPawn;
   }
 }
 
-export function hasAnyLegalMoveFast(board, color, state) {
-  const opponent = opposite(color);
+// 判断 color 方是否还有任意合法走法（用于将杀/逼和判定）。
+export function hasAnyLegalMove(board, color, state) {
   for (let r = 0; r < 8; r++) {
     for (let c = 0; c < 8; c++) {
       const p = board[r][c];
-      if (!p || p.color !== color) continue;
-      const pseudo = getPseudoLegalMoves(board, r, c, state);
-      for (const move of pseudo) {
-        // 易位：与 getLegalMoves 完全一致的额外路径校验（保持判定结果一致）
-        if (move.special === 'castle-kingside' || move.special === 'castle-queenside') {
-          const row = move.from.r;
-          const startC = 4;
-          const midC = move.special === 'castle-kingside' ? 5 : 3;
-          const endC = move.special === 'castle-kingside' ? 6 : 2;
-          if (isSquareAttacked(board, row, startC, opponent)) continue;
-          if (isSquareAttacked(board, row, midC, opponent)) continue;
-          if (isSquareAttacked(board, row, endC, opponent)) continue;
-        }
-        const undo = makeMoveInPlace(board, move);
-        const ok = !isInCheck(board, color);
-        unmakeMove(board, move, undo);
-        if (ok) return true;
+      if (p && p.color === color) {
+        if (getLegalMoves(board, r, c, state).length > 0) return true;
       }
     }
   }
   return false;
 }
 
-export function hasAnyLegalMove(board, color, state) {
-  return hasAnyLegalMoveFast(board, color, state);
+// 将杀：被将军且无合法走法。可选传入预计算的 inCheck 避免重复扫描。
+export function isCheckmate(board, color, state, inCheck) {
+  if (inCheck === undefined) inCheck = isInCheck(board, color);
+  return inCheck && !hasAnyLegalMove(board, color, state);
 }
 
-// 将杀：被将军且无合法走法。
-export function isCheckmate(board, color, state) {
-  return isInCheck(board, color) && !hasAnyLegalMove(board, color, state);
-}
-
-// 逼和：未被将军且无合法走法。
-export function isStalemate(board, color, state) {
-  return !isInCheck(board, color) && !hasAnyLegalMove(board, color, state);
+// 逼和：未被将军且无合法走法。可选传入预计算的 inCheck 避免重复扫描。
+export function isStalemate(board, color, state, inCheck) {
+  if (inCheck === undefined) inCheck = isInCheck(board, color);
+  return !inCheck && !hasAnyLegalMove(board, color, state);
 }
 
 // 子力不足和棋：仅王；王+单马/单象对王；王+单象对王+单象且象同色格。

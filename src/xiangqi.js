@@ -340,6 +340,7 @@ export function applyMove(board, move, state) {
 }
 
 // 生成合法走法：过滤走完后己方将仍被将军（含飞将）的走法。
+// 内部使用 make/unmake 在原棋盘上模拟，避免每个伪合法走法都 cloneBoard。
 export function getLegalMoves(board, r, c, state) {
   const piece = board[r][c];
   if (!piece) return [];
@@ -348,58 +349,56 @@ export function getLegalMoves(board, r, c, state) {
   const legal = [];
 
   for (const move of pseudo) {
-    const { board: next } = applyMove(board, move, state);
-    if (!isInCheck(next, color)) legal.push(move);
+    const captured = board[move.to.r][move.to.c];
+    board[move.to.r][move.to.c] = piece;
+    board[move.from.r][move.from.c] = null;
+    if (!isInCheck(board, color)) legal.push(move);
+    // unmake
+    board[move.from.r][move.from.c] = piece;
+    board[move.to.r][move.to.c] = captured;
   }
 
   return legal;
 }
 
+// 单步走法校验：仅校验客户端提交的 from/to 是否合法。
+// 比先 getLegalMoves 再 find 快一个数量级（只做 1 次 applyMove + isInCheck）。
+// 返回 { legal: boolean, move? }。
+export function isLegalMove(board, fromR, fromC, toR, toC, state) {
+  const piece = board[fromR] && board[fromR][fromC];
+  if (!piece) return { legal: false };
+  const color = piece.color;
+  const pseudo = getPseudoLegalMoves(board, fromR, fromC, state);
+  const matched = pseudo.find((m) => m.to.r === toR && m.to.c === toC);
+  if (!matched) return { legal: false };
+
+  const { board: next } = applyMove(board, matched, state);
+  if (isInCheck(next, color)) return { legal: false };
+  return { legal: true, move: matched };
+}
+
 // 判断 color 方是否还有任意合法走法（用于将杀/困毙判定）。
-// 用 make/unmake 原地走法替代 cloneBoard，仅服务端将杀/困毙判定路径使用。
-// 中国象棋 applyMove 极简（仅移动棋子，无易位/升变/过路兵），make/unmake 只需还原 to/from。
-function makeMoveInPlace(board, move) {
-  const from = move.from, to = move.to;
-  const piece = board[from.r][from.c];
-  const captured = board[to.r][to.c];
-  board[to.r][to.c] = piece;
-  board[from.r][from.c] = null;
-  return { piece, captured };
-}
-
-function unmakeMove(board, move, undo) {
-  const from = move.from, to = move.to;
-  board[from.r][from.c] = undo.piece;
-  board[to.r][to.c] = undo.captured;
-}
-
-export function hasAnyLegalMoveFast(board, color, state) {
+export function hasAnyLegalMove(board, color, state) {
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       const p = board[r][c];
-      if (!p || p.color !== color) continue;
-      const pseudo = getPseudoLegalMoves(board, r, c, state);
-      for (const move of pseudo) {
-        const undo = makeMoveInPlace(board, move);
-        const ok = !isInCheck(board, color);
-        unmakeMove(board, move, undo);
-        if (ok) return true;
+      if (p && p.color === color) {
+        if (getLegalMoves(board, r, c, state).length > 0) return true;
       }
     }
   }
   return false;
 }
 
-export function hasAnyLegalMove(board, color, state) {
-  return hasAnyLegalMoveFast(board, color, state);
-}
-
-// 将杀：被将军且无合法走法。
-export function isCheckmate(board, color, state) {
-  return isInCheck(board, color) && !hasAnyLegalMove(board, color, state);
+// 将杀：被将军且无合法走法。可选传入预计算的 inCheck 避免重复扫描。
+export function isCheckmate(board, color, state, inCheck) {
+  if (inCheck === undefined) inCheck = isInCheck(board, color);
+  return inCheck && !hasAnyLegalMove(board, color, state);
 }
 
 // 困毙：未被将军且无合法走法（中国象棋规则：困毙判负）。
-export function isStalemate(board, color, state) {
-  return !isInCheck(board, color) && !hasAnyLegalMove(board, color, state);
+// 可选传入预计算的 inCheck 避免重复扫描。
+export function isStalemate(board, color, state, inCheck) {
+  if (inCheck === undefined) inCheck = isInCheck(board, color);
+  return !inCheck && !hasAnyLegalMove(board, color, state);
 }

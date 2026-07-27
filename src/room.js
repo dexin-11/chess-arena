@@ -21,6 +21,57 @@ export class Room {
     this.whitePlayer = null;
     this.nextId = 0;
     this.rematchVotes = new Map(); // wsId -> gameType
+    this.lastStatusSnapshot = null; // 心跳状态去重用
+    this._stateLoadPromise = null; // 防止并发重复加载 storage
+  }
+
+  // 从 DO SQLite 加载持久化对局状态（断线重连/DO 重启后恢复棋盘）。
+  // 幂等：并发调用共享同一个 Promise。
+  ensureStateLoaded() {
+    if (this._stateLoadPromise) return this._stateLoadPromise;
+    this._stateLoadPromise = (async () => {
+      try {
+        const saved = await this.state.storage.get('game');
+        if (saved && saved.gameType) {
+          this.gameType = saved.gameType;
+          this.board = saved.board || Array.from({ length: 15 }, () => Array(15).fill(null));
+          this.chessBoard = saved.chessBoard || null;
+          this.chessState = saved.chessState || null;
+          this.xiangqiBoard = saved.xiangqiBoard || null;
+          this.xiangqiState = saved.xiangqiState || null;
+          this.lastMove = saved.lastMove || null;
+          this.currentTurn = saved.currentTurn || 'black';
+          this.gameOver = !!saved.gameOver;
+          this.winner = saved.winner || null;
+          this.draw = !!saved.draw;
+        }
+      } catch {
+        // 忽略 storage 错误，回退到默认状态
+      }
+    })();
+    return this._stateLoadPromise;
+  }
+
+  // 持久化当前对局状态到 DO SQLite。每步走棋后调用，fire-and-forget。
+  async persistState() {
+    if (!this.state || !this.state.storage) return;
+    try {
+      await this.state.storage.put('game', {
+        gameType: this.gameType,
+        board: this.board,
+        chessBoard: this.chessBoard,
+        chessState: this.chessState,
+        xiangqiBoard: this.xiangqiBoard,
+        xiangqiState: this.xiangqiState,
+        lastMove: this.lastMove,
+        currentTurn: this.currentTurn,
+        gameOver: this.gameOver,
+        winner: this.winner,
+        draw: this.draw,
+      });
+    } catch {
+      // 忽略持久化错误
+    }
   }
 
   async fetch(request) {
@@ -50,6 +101,8 @@ export class Room {
 
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
+    // 先恢复持久化状态，再接受 WebSocket（断线重连/DO 重启后可继续对局）
+    await this.ensureStateLoaded();
     this.acceptWebSocket(server, gameTypeFromUrl);
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -184,16 +237,8 @@ export class Room {
         break;
 
       case 'latency':
-        // 仅当 latency 显著变化（≥10ms）才广播，避免每 5s 触发双端 DOM 抖动
-        {
-          const newLat = typeof msg.latency === 'number' ? msg.latency : 0;
-          if (Math.abs(newLat - conn.latency) >= 10) {
-            conn.latency = newLat;
-            this.broadcastStatus();
-          } else {
-            conn.latency = newLat;
-          }
-        }
+        conn.latency = msg.latency;
+        this.maybeBroadcastStatus();
         break;
 
       case 'move':
@@ -249,11 +294,13 @@ export class Room {
       this.gameOver = true;
       this.winner = conn.color;
       this.draw = false;
+      this.broadcastMoveApplied({ row, col, color: conn.color, check: null });
       this.broadcast({ type: 'gameOver', winner: conn.color, draw: false });
-      this.broadcastSync();
+      this.persistState();
     } else {
       this.currentTurn = this.currentTurn === 'black' ? 'white' : 'black';
-      this.broadcastSync();
+      this.broadcastMoveApplied({ row, col, color: conn.color, check: null });
+      this.persistState();
     }
   }
 
@@ -274,54 +321,53 @@ export class Room {
     const piece = this.chessBoard[from.r][from.c];
     if (!piece || piece.color !== conn.color) return;
 
-    const legalMoves = Chess.getLegalMoves(this.chessBoard, from.r, from.c, this.chessState);
-
-    // 先按 from/to/special 精确匹配；找不到再按 from/to 兜底（客户端可能省略 special）
-    let matched = legalMoves.find(
-      (m) =>
-        m.from.r === from.r && m.from.c === from.c &&
-        m.to.r === to.r && m.to.c === to.c &&
-        (m.special || null) === (msg.special || null)
+    // 单步走法校验：只校验提交的这一步，不重算全部合法走法
+    const { legal, move } = Chess.isLegalMove(
+      this.chessBoard, from.r, from.c, to.r, to.c, this.chessState, msg.special, msg.promotionPiece
     );
-    if (!matched) {
-      matched = legalMoves.find(
-        (m) =>
-          m.from.r === from.r && m.from.c === from.c &&
-          m.to.r === to.r && m.to.c === to.c
-      );
-    }
-    if (!matched) return;
+    if (!legal) return;
 
-    const promotionPiece = matched.special === 'promotion' ? (msg.promotionPiece || 'q') : undefined;
-    const result = Chess.applyMove(this.chessBoard, matched, this.chessState, promotionPiece);
+    const promotionPiece = move.special === 'promotion' ? (msg.promotionPiece || 'q') : undefined;
+    const result = Chess.applyMove(this.chessBoard, move, this.chessState, promotionPiece);
     this.chessBoard = result.board;
     this.chessState = result.newState;
-    this.lastMove = { from: { r: matched.from.r, c: matched.from.c }, to: { r: matched.to.r, c: matched.to.c } };
+    this.lastMove = { from: { r: move.from.r, c: move.from.c }, to: { r: move.to.r, c: move.to.c } };
 
     const opponentColor = conn.color === 'white' ? 'black' : 'white';
     this.currentTurn = opponentColor;
 
-    if (Chess.isCheckmate(this.chessBoard, opponentColor, this.chessState)) {
+    // 走完子后只算一次 isInCheck，复用给终局判定与将军通知
+    const inCheck = Chess.isInCheck(this.chessBoard, opponentColor);
+
+    if (inCheck && Chess.isCheckmate(this.chessBoard, opponentColor, this.chessState, inCheck)) {
       this.gameOver = true;
       this.winner = conn.color;
       this.draw = false;
+      this.broadcastMoveApplied({
+        from: move.from, to: move.to, captured: result.captured,
+        special: move.special, promotionPiece, check: opponentColor,
+      });
       this.broadcast({ type: 'gameOver', winner: conn.color, draw: false });
-      this.broadcastSync();
+      this.persistState();
     } else if (
-      Chess.isStalemate(this.chessBoard, opponentColor, this.chessState) ||
+      (!inCheck && Chess.isStalemate(this.chessBoard, opponentColor, this.chessState, inCheck)) ||
       Chess.isInsufficientMaterial(this.chessBoard)
     ) {
       this.gameOver = true;
       this.winner = null;
       this.draw = true;
+      this.broadcastMoveApplied({
+        from: move.from, to: move.to, captured: result.captured,
+        special: move.special, promotionPiece, check: null,
+      });
       this.broadcast({ type: 'gameOver', winner: null, draw: true });
-      this.broadcastSync();
+      this.persistState();
     } else {
-      this.broadcastSync();
-      // 非将杀的将军：sync 之后发送 check 通知，客户端据此高亮被将军的王
-      if (Chess.isInCheck(this.chessBoard, opponentColor)) {
-        this.broadcast({ type: 'check', color: opponentColor });
-      }
+      this.broadcastMoveApplied({
+        from: move.from, to: move.to, captured: result.captured,
+        special: move.special, promotionPiece, check: inCheck ? opponentColor : null,
+      });
+      this.persistState();
     }
   }
 
@@ -347,41 +393,48 @@ export class Room {
     const piece = this.xiangqiBoard[from.r][from.c];
     if (!piece || piece.color !== conn.color) return;
 
-    const legalMoves = Xiangqi.getLegalMoves(this.xiangqiBoard, from.r, from.c, this.xiangqiState);
-    const matched = legalMoves.find(
-      (m) =>
-        m.from.r === from.r && m.from.c === from.c &&
-        m.to.r === to.r && m.to.c === to.c
+    // 单步走法校验：只校验提交的这一步，不重算全部合法走法
+    const { legal, move } = Xiangqi.isLegalMove(
+      this.xiangqiBoard, from.r, from.c, to.r, to.c, this.xiangqiState
     );
-    if (!matched) return;
+    if (!legal) return;
 
-    const result = Xiangqi.applyMove(this.xiangqiBoard, matched, this.xiangqiState);
+    const result = Xiangqi.applyMove(this.xiangqiBoard, move, this.xiangqiState);
     this.xiangqiBoard = result.board;
     this.xiangqiState = result.newState;
-    this.lastMove = { from: { r: matched.from.r, c: matched.from.c }, to: { r: matched.to.r, c: matched.to.c } };
+    this.lastMove = { from: { r: move.from.r, c: move.from.c }, to: { r: move.to.r, c: move.to.c } };
 
     const opponentColor = conn.color === 'red' ? 'black' : 'red';
     this.currentTurn = opponentColor;
 
-    if (Xiangqi.isCheckmate(this.xiangqiBoard, opponentColor, this.xiangqiState)) {
+    // 走完子后只算一次 isInCheck，复用给终局判定与将军通知
+    const inCheck = Xiangqi.isInCheck(this.xiangqiBoard, opponentColor);
+
+    if (inCheck && Xiangqi.isCheckmate(this.xiangqiBoard, opponentColor, this.xiangqiState, inCheck)) {
       this.gameOver = true;
       this.winner = conn.color;
       this.draw = false;
+      this.broadcastMoveApplied({
+        from: move.from, to: move.to, captured: result.captured, check: opponentColor,
+      });
       this.broadcast({ type: 'gameOver', winner: conn.color, draw: false });
-      this.broadcastSync();
-    } else if (Xiangqi.isStalemate(this.xiangqiBoard, opponentColor, this.xiangqiState)) {
+      this.persistState();
+    } else if (!inCheck && Xiangqi.isStalemate(this.xiangqiBoard, opponentColor, this.xiangqiState, inCheck)) {
       // 困毙判负（中国象棋规则）
       this.gameOver = true;
       this.winner = conn.color;
       this.draw = false;
+      this.broadcastMoveApplied({
+        from: move.from, to: move.to, captured: result.captured, check: null,
+      });
       this.broadcast({ type: 'gameOver', winner: conn.color, draw: false });
-      this.broadcastSync();
+      this.persistState();
     } else {
-      this.broadcastSync();
-      // 非将杀的将军：sync 之后发送 check 通知，客户端据此高亮被将军的将/帅
-      if (Xiangqi.isInCheck(this.xiangqiBoard, opponentColor)) {
-        this.broadcast({ type: 'check', color: opponentColor });
-      }
+      this.broadcastMoveApplied({
+        from: move.from, to: move.to, captured: result.captured,
+        check: inCheck ? opponentColor : null,
+      });
+      this.persistState();
     }
   }
 
@@ -531,6 +584,7 @@ export class Room {
     this.rematchVotes.clear();
 
     this.assignColors();
+    this.persistState();
   }
 
   broadcastSync() {
@@ -558,17 +612,77 @@ export class Room {
     this.broadcast(payload);
   }
 
+  // 增量走法广播：客户端本地 applyMove + 局部 DOM 更新，避免每次走棋都全量 sync。
+  // moveInfo 字段因棋种而异：
+  //   chess/xiangqi: { from, to, captured, special?, promotionPiece?, check }
+  //   gomoku:        { row, col, color, check }
+  broadcastMoveApplied(moveInfo) {
+    const payload = {
+      type: 'moveApplied',
+      gameType: this.gameType,
+      turn: this.currentTurn,
+      lastMove: this.lastMove,
+      check: moveInfo.check || null,
+      gameOver: this.gameOver,
+      winner: this.winner,
+      draw: this.draw,
+    };
+    if (this.gameType === 'chess') {
+      payload.from = moveInfo.from;
+      payload.to = moveInfo.to;
+      payload.captured = moveInfo.captured;
+      payload.special = moveInfo.special || null;
+      payload.promotionPiece = moveInfo.promotionPiece || null;
+      payload.chessState = this.chessState;
+    } else if (this.gameType === 'xiangqi') {
+      payload.from = moveInfo.from;
+      payload.to = moveInfo.to;
+      payload.captured = moveInfo.captured;
+      payload.xiangqiState = this.xiangqiState;
+    } else {
+      payload.row = moveInfo.row;
+      payload.col = moveInfo.col;
+      payload.color = moveInfo.color;
+    }
+    this.broadcast(payload);
+  }
+
+  // 状态广播：连接/断开/分配颜色等关键事件强制广播；心跳上报仅在状态变化时广播。
   broadcastStatus() {
     const status = {};
     for (const [, conn] of this.connections) {
       if (conn.color) {
-        status[conn.color] = {
-          latency: conn.latency,
-          online: conn.online,
-        };
+        status[conn.color] = { latency: conn.latency, online: conn.online };
       }
     }
+    this.lastStatusSnapshot = this._snapshotStatus(status);
     this.broadcast({ type: 'status', players: status });
+  }
+
+  // 心跳去重：latency 按 10ms 桶量化后与上次快照比较，无变化则跳过广播。
+  maybeBroadcastStatus() {
+    const status = {};
+    for (const [, conn] of this.connections) {
+      if (conn.color) {
+        status[conn.color] = { latency: conn.latency, online: conn.online };
+      }
+    }
+    const snapshot = this._snapshotStatus(status);
+    if (snapshot === this.lastStatusSnapshot) return;
+    this.lastStatusSnapshot = snapshot;
+    this.broadcast({ type: 'status', players: status });
+  }
+
+  // 用 10ms 桶量化的状态字符串做去重 key，避免微小抖动触发频繁广播。
+  _snapshotStatus(status) {
+    const rounded = {};
+    for (const color of Object.keys(status)) {
+      rounded[color] = {
+        latency: Math.round((status[color].latency || 0) / 10) * 10,
+        online: status[color].online,
+      };
+    }
+    return JSON.stringify(rounded);
   }
 
   broadcast(msg) {
