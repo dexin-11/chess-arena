@@ -584,6 +584,10 @@ export class Room {
     this.lastMove = null;
     this.rematchVotes.clear();
 
+    // 显式通知双方重赛已开始：立即隐藏 rematchWaiting/rematchModal 等弹窗，
+    // 不依赖随后 colorAssign 触发 hideAllModals 的副作用（colorAssign 在网络抖动/DO 重启时可能延迟或丢失）。
+    this.broadcast({ type: 'rematchStart' });
+
     this.assignColors();
     this.persistState();
   }
