@@ -155,6 +155,9 @@ body {
 .xiangqi-cell.edge-bottom::after { bottom: 50%; } /* 底行：垂直线只在上半部分（下方无格子） */
 .xiangqi-cell.edge-left::before { left: 50%; } /* 左列：水平线只在右半部分（左方无格子） */
 .xiangqi-cell.edge-right::before { right: 50%; } /* 右列：水平线只在左半部分（右方无格子） */
+/* 楚河汉界断竖线：row 4 下方是河界（竖线只画上半），row 5 上方是河界（竖线只画下半） */
+.xiangqi-cell.river-edge-bottom::after { bottom: 50%; } /* row 4: 竖线只在上半部分 */
+.xiangqi-cell.river-edge-top::after { top: 50%; } /* row 5: 竖线只在下半部分 */
 /* 楚河汉界 */
 .xiangqi-river { position: absolute; left: 0; right: 0; top: 45%; height: 10%; display: flex; align-items: center; justify-content: space-around; font-size: calc(var(--board-size) * 0.06); color: rgba(60,30,10,0.5); font-family: 'Ma Shan Zheng', 'STKaiti', 'KaiTi', serif; font-weight: 700; letter-spacing: 0.3em; pointer-events: none; z-index: 1; }
 .xiangqi-river span { display: inline-block; }
@@ -167,7 +170,8 @@ body {
 .xiangqi-cell .xpiece.red { color: #b91c1c; border: 2px solid #7f1d1d; text-shadow: 0 1px 0 rgba(255,250,235,0.5); }
 .xiangqi-cell .xpiece.black { color: #1f1f1f; border: 2px solid #0a0a0a; text-shadow: 0 1px 0 rgba(255,250,235,0.4); }
 .xiangqi-cell.selected .xpiece { transform: translateY(-1px) scale(1.06); box-shadow: 0 0 0 min(0.5vmin,5px) var(--accent), 0 3px 7px rgba(60,30,10,0.5), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); }
-.xiangqi-cell.last-move::before { background: rgba(233,69,96,0.45); }
+/* last-move 用 inset 边框标记，不改变网格线颜色 */
+.xiangqi-cell.last-move { box-shadow: inset 0 0 0 min(0.4vmin, 4px) rgba(233,69,96,0.4); }
 .xiangqi-cell.check-king .xpiece { box-shadow: 0 0 0 min(0.5vmin,5px) #ff3333, 0 3px 7px rgba(60,30,10,0.5), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); }
 /* 走法提示：move-hint 容器复用，子类区分空格点/吃子环 */
 .xiangqi-cell .move-hint { position: absolute; pointer-events: none; z-index: 2; }
@@ -1143,6 +1147,13 @@ function buildXiangqiDOM(boardEl) {
       if (visualR === 9) cell.classList.add('edge-bottom');
       if (visualC === 0) cell.classList.add('edge-left');
       if (visualC === 8) cell.classList.add('edge-right');
+
+      // 河界断竖线：row 4 下方是河界、row 5 上方是河界，
+      // 仅边界列 (col 0/8) 的竖线保持连通，其余列在河界处断开
+      if (c !== 0 && c !== 8) {
+        if (r === 4) cell.classList.add('river-edge-bottom');
+        if (r === 5) cell.classList.add('river-edge-top');
+      }
 
       // 棋子容器（固定占位，更新时只改内容）
       const pieceSpan = document.createElement('span');
