@@ -477,7 +477,8 @@ export class Room {
     if (!conn) return;
 
     this.connections.delete(wsId);
-    this.rematchVotes.delete(wsId);
+    // 一方断线则重赛协商无法继续，清空双方 vote，避免残留 vote 误导重连后的申请
+    this.rematchVotes.clear();
 
     if (this.connections.size === 0) {
       this.state.abort();

@@ -1688,7 +1688,23 @@ function connect() {
         checkColor = null;
         renderBoard();
         updateHeader();
-        if (!gameOver && myColor) {
+        if (gameOver) {
+          // 重连到已结束的对局：恢复结果界面（含赢/输/和棋文案），便于重新发起重赛
+          const overlay = document.getElementById('resultOverlay');
+          overlay.classList.remove('hidden');
+          const txt = document.getElementById('resultText');
+          if (draw) {
+            txt.textContent = '🤝 和棋';
+            txt.style.color = '#f0a500';
+          } else if (msg.winner && msg.winner === myColor) {
+            txt.textContent = '🎉 你赢了！';
+            txt.style.color = '#4ecca3';
+          } else {
+            txt.textContent = '😔 你输了';
+            txt.style.color = '#e94560';
+          }
+          setRematchSelectDefaults();
+        } else if (myColor) {
           setStatus(myColor === currentTurn ? '轮到你了！' : '等待对手落子...');
         }
         break;
@@ -1799,6 +1815,13 @@ function connect() {
         break;
 
       case 'opponentLeft':
+        // 对手断线：若正在重赛协商中，隐藏重赛弹窗并回到结果界面，便于对手重连后重新发起
+        document.getElementById('rematchWaiting').classList.add('hidden');
+        document.getElementById('rematchModal').classList.add('hidden');
+        rematchRole = null;
+        if (gameOver) {
+          document.getElementById('resultOverlay').classList.remove('hidden');
+        }
         setStatus('对手已断开，等待重连...');
         break;
 
