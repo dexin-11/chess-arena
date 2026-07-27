@@ -184,8 +184,16 @@ export class Room {
         break;
 
       case 'latency':
-        conn.latency = msg.latency;
-        this.broadcastStatus();
+        // 仅当 latency 显著变化（≥10ms）才广播，避免每 5s 触发双端 DOM 抖动
+        {
+          const newLat = typeof msg.latency === 'number' ? msg.latency : 0;
+          if (Math.abs(newLat - conn.latency) >= 10) {
+            conn.latency = newLat;
+            this.broadcastStatus();
+          } else {
+            conn.latency = newLat;
+          }
+        }
         break;
 
       case 'move':
