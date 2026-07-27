@@ -122,8 +122,11 @@ body {
 
 .cell.disabled { cursor: default; }
 .cell.disabled .preview { display: none; }
-.cell.last-move .stone.black { box-shadow: 0 0 0 min(0.4vmin, 4px) var(--accent), 1px 2px 4px rgba(0,0,0,0.6), inset 0 -2px 4px rgba(0,0,0,0.5); }
-.cell.last-move .stone.white { box-shadow: 0 0 0 min(0.4vmin, 4px) var(--accent), 1px 2px 4px rgba(0,0,0,0.4), inset 0 -2px 4px rgba(0,0,0,0.2); }
+/* 走棋上一步标记：彩色圆点（替代原红色矩形/红圈）
+   from=黄(起点) to=绿(落点)；圆点置于格子右上角，z-index 高于棋子以始终可见。*/
+.cell .last-move-dot, .chess-cell .last-move-dot, .xiangqi-cell .last-move-dot { position: absolute; top: 5%; right: 5%; width: 22%; height: 22%; border-radius: 50%; pointer-events: none; z-index: 5; box-shadow: 0 0 0 1.5px rgba(255,255,255,0.75), 0 1px 3px rgba(0,0,0,0.45); }
+.last-move-dot.from { background: #f0a500; }
+.last-move-dot.to { background: #4ecca3; }
 .cell .coord { position: absolute; font-size: min(1.6vmin, 10px); font-family: 'JetBrains Mono', monospace; font-weight: 700; pointer-events: none; color: rgba(60,30,10,0.55); z-index: 1; }
 .cell .coord.file { bottom: 1px; right: 3px; }
 .cell .coord.rank { top: 1px; left: 3px; }
@@ -138,7 +141,6 @@ body {
 .chess-cell .piece.black { color: #1a1a1a; text-shadow: 0 0 1px rgba(255,255,255,0.22), 0 2px 3px rgba(0,0,0,0.5); }
 .chess-cell.selected .piece { transform: translateY(-1px) scale(1.04); }
 .chess-cell.selected { box-shadow: inset 0 0 0 min(0.4vmin, 4px) var(--accent); }
-.chess-cell.last-move { box-shadow: inset 0 0 0 min(0.4vmin, 4px) rgba(233, 69, 96, 0.85); }
 .chess-cell.check-king { box-shadow: inset 0 0 0 min(0.4vmin, 4px) #ff3333; background: #ff6666 !important; }
 .chess-cell .move-dot { position: absolute; width: 32%; height: 32%; border-radius: 50%; background: rgba(0,0,0,0.28); pointer-events: none; z-index: 1; }
 .chess-cell .capture-ring { position: absolute; inset: 6%; border: min(0.4vmin, 4px) solid rgba(0,0,0,0.32); border-radius: 50%; box-sizing: border-box; pointer-events: none; z-index: 1; }
@@ -181,7 +183,14 @@ body {
 .xiangqi-cell .xpiece.black { color: #1f1f1f; border: 2px solid #0a0a0a; text-shadow: 0 1px 0 rgba(255,250,235,0.4); }
 .xiangqi-cell.selected { box-shadow: inset 0 0 0 min(0.4vmin, 4px) var(--accent); }
 .xiangqi-cell.selected .xpiece { transform: translateY(-1px) scale(1.04); box-shadow: inset 0 0 0 min(0.4vmin,4px) var(--accent), 0 3px 7px rgba(60,30,10,0.5), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); }
-.xiangqi-cell.last-move { box-shadow: inset 0 0 0 min(0.4vmin, 4px) rgba(233, 69, 96, 0.85); }
+/* 中国象棋十字花角标（兵卒位与炮位）：在交叉点四角绘制 L 形角标，
+   col=0 只画右侧两角、col=8 只画左侧两角，标准棋盘装饰。*/
+.xiangqi-cell .corner-mark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 55%; height: 55%; pointer-events: none; z-index: 1; }
+.xiangqi-cell .corner-mark .corner { position: absolute; width: 30%; height: 30%; }
+.xiangqi-cell .corner-mark .corner.tl { top: 0; left: 0; border-top: 1.5px solid rgba(60,30,10,0.7); border-left: 1.5px solid rgba(60,30,10,0.7); }
+.xiangqi-cell .corner-mark .corner.tr { top: 0; right: 0; border-top: 1.5px solid rgba(60,30,10,0.7); border-right: 1.5px solid rgba(60,30,10,0.7); }
+.xiangqi-cell .corner-mark .corner.bl { bottom: 0; left: 0; border-bottom: 1.5px solid rgba(60,30,10,0.7); border-left: 1.5px solid rgba(60,30,10,0.7); }
+.xiangqi-cell .corner-mark .corner.br { bottom: 0; right: 0; border-bottom: 1.5px solid rgba(60,30,10,0.7); border-right: 1.5px solid rgba(60,30,10,0.7); }
 .xiangqi-cell.check-king .xpiece { box-shadow: 0 0 0 min(0.5vmin,5px) #ff3333, 0 3px 7px rgba(60,30,10,0.5), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); }
 .xiangqi-cell .move-dot { position: absolute; width: 26%; height: 26%; border-radius: 50%; background: rgba(60,30,10,0.3); pointer-events: none; z-index: 2; }
 .xiangqi-cell .capture-ring { position: absolute; inset: 7%; border: min(0.5vmin,5px) solid rgba(233,69,96,0.6); border-radius: 50%; box-sizing: border-box; pointer-events: none; z-index: 2; }
@@ -962,6 +971,44 @@ function getCell(r, c) {
   return document.querySelector('[data-row="' + r + '"][data-col="' + c + '"]');
 }
 
+// === 走棋上一步标记（彩色圆点） ===
+function addLastMoveDot(r, c, type) {
+  const cell = getCell(r, c);
+  if (!cell) return;
+  const dot = document.createElement('span');
+  dot.className = 'last-move-dot ' + type;
+  cell.appendChild(dot);
+}
+
+function clearLastMoveDots() {
+  document.querySelectorAll('.last-move-dot').forEach((el) => el.remove());
+}
+
+// === 中国象棋十字花角标（兵卒位与炮位） ===
+function isXiangqiMarkedPosition(r, c) {
+  // 炮位：(2,1)(2,7)(7,1)(7,7)
+  if ((r === 2 || r === 7) && (c === 1 || c === 7)) return true;
+  // 兵卒位：(3,0/2/4/6/8)(6,0/2/4/6/8)
+  if ((r === 3 || r === 6) && (c === 0 || c === 2 || c === 4 || c === 6 || c === 8)) return true;
+  return false;
+}
+
+// visualC 为视觉列（已考虑翻转）；col=0 只画右侧角，col=8 只画左侧角
+function addXiangqiCornerMark(cell, r, c, visualC) {
+  if (!isXiangqiMarkedPosition(r, c)) return;
+  const mark = document.createElement('div');
+  mark.className = 'corner-mark';
+  if (visualC !== 0) {
+    const tl = document.createElement('div'); tl.className = 'corner tl'; mark.appendChild(tl);
+    const bl = document.createElement('div'); bl.className = 'corner bl'; mark.appendChild(bl);
+  }
+  if (visualC !== 8) {
+    const tr = document.createElement('div'); tr.className = 'corner tr'; mark.appendChild(tr);
+    const br = document.createElement('div'); br.className = 'corner br'; mark.appendChild(br);
+  }
+  cell.appendChild(mark);
+}
+
 // === 增量渲染：只更新走棋影响的格子，避免整张棋盘 DOM 重建 ===
 
 // 设置国际象棋某格的棋子内容（diff 用）
@@ -999,12 +1046,10 @@ function renderChessMove(from, to, special) {
     setChessCellPiece(row, 3, chessBoardData[row][3]);
   }
 
-  // lastMove 高亮
-  document.querySelectorAll('.chess-cell.last-move').forEach((el) => el.classList.remove('last-move'));
-  const fromCell = getCell(from.r, from.c);
-  const toCell = getCell(to.r, to.c);
-  if (fromCell) fromCell.classList.add('last-move');
-  if (toCell) toCell.classList.add('last-move');
+  // lastMove 彩色圆点（from=黄 to=绿）
+  clearLastMoveDots();
+  addLastMoveDot(from.r, from.c, 'from');
+  addLastMoveDot(to.r, to.c, 'to');
 
   // 将军高亮
   document.querySelectorAll('.chess-cell.check-king').forEach((el) => el.classList.remove('check-king'));
@@ -1043,11 +1088,10 @@ function renderXiangqiMove(from, to) {
   setXiangqiCellPiece(from.r, from.c, null);
   setXiangqiCellPiece(to.r, to.c, xiangqiBoardData[to.r][to.c]);
 
-  document.querySelectorAll('.xiangqi-cell.last-move').forEach((el) => el.classList.remove('last-move'));
-  const fromCell = getCell(from.r, from.c);
-  const toCell = getCell(to.r, to.c);
-  if (fromCell) fromCell.classList.add('last-move');
-  if (toCell) toCell.classList.add('last-move');
+  // lastMove 彩色圆点（from=黄 to=绿）
+  clearLastMoveDots();
+  addLastMoveDot(from.r, from.c, 'from');
+  addLastMoveDot(to.r, to.c, 'to');
 
   document.querySelectorAll('.xiangqi-cell.check-king').forEach((el) => el.classList.remove('check-king'));
   if (checkColor) {
@@ -1065,8 +1109,8 @@ function renderXiangqiMove(from, to) {
 }
 
 function renderGomokuMove(row, col, color) {
-  // 清除上一帧 last-move 高亮
-  document.querySelectorAll('.cell.last-move').forEach((el) => el.classList.remove('last-move'));
+  // 清除上一帧 last-move 圆点
+  clearLastMoveDots();
   const cell = getCell(row, col);
   if (!cell) return;
   if (boardData[row][col]) {
@@ -1079,8 +1123,10 @@ function renderGomokuMove(row, col, color) {
     }
     cell.classList.add('disabled');
   }
-  // 添加 last-move 高亮
-  cell.classList.add('last-move');
+  // 添加 last-move 圆点（绿点表示落子位置）
+  const dot = document.createElement('span');
+  dot.className = 'last-move-dot to';
+  cell.appendChild(dot);
   // 移除 hover 预览
   const preview = cell.querySelector('.preview');
   if (preview) preview.remove();
@@ -1091,11 +1137,13 @@ function renderGomoku() {
     for (let c = 0; c < COLS; c++) {
       const cell = getCell(r, c);
       if (!cell) continue;
-      // last-move 高亮
+      // last-move 圆点（绿点表示落子位置）
+      const existingDot = cell.querySelector('.last-move-dot');
+      if (existingDot) existingDot.remove();
       if (lastMove && lastMove.row === r && lastMove.col === c) {
-        cell.classList.add('last-move');
-      } else {
-        cell.classList.remove('last-move');
+        const dot = document.createElement('span');
+        dot.className = 'last-move-dot to';
+        cell.appendChild(dot);
       }
       const existing = cell.querySelector('.stone');
       if (boardData[r][c]) {
@@ -1164,8 +1212,15 @@ function renderChess() {
       if (chessSelected && chessSelected.r === r && chessSelected.c === c) {
         cell.classList.add('selected');
       }
-      if (lastMove && ((lastMove.from.r === r && lastMove.from.c === c) || (lastMove.to.r === r && lastMove.to.c === c))) {
-        cell.classList.add('last-move');
+      if (lastMove && lastMove.from.r === r && lastMove.from.c === c) {
+        const dot = document.createElement('span');
+        dot.className = 'last-move-dot from';
+        cell.appendChild(dot);
+      }
+      if (lastMove && lastMove.to.r === r && lastMove.to.c === c) {
+        const dot = document.createElement('span');
+        dot.className = 'last-move-dot to';
+        cell.appendChild(dot);
       }
       if (checkColor && piece && piece.type === 'k' && piece.color === checkColor) {
         cell.classList.add('check-king');
@@ -1297,6 +1352,9 @@ function renderXiangqi() {
       if (visualR === 4) cell.classList.add('river-top');
       if (visualR === 5) cell.classList.add('river-bottom');
 
+      // 兵卒位与炮位的十字花角标（视觉列已考虑翻转）
+      addXiangqiCornerMark(cell, r, c, visualC);
+
       const piece = (xiangqiBoardData && xiangqiBoardData[r]) ? xiangqiBoardData[r][c] : null;
       if (piece && XIANGQI_GLYPHS[piece.color] && XIANGQI_GLYPHS[piece.color][piece.type]) {
         const span = document.createElement('span');
@@ -1308,8 +1366,15 @@ function renderXiangqi() {
       if (xiangqiSelected && xiangqiSelected.r === r && xiangqiSelected.c === c) {
         cell.classList.add('selected');
       }
-      if (lastMove && ((lastMove.from.r === r && lastMove.from.c === c) || (lastMove.to.r === r && lastMove.to.c === c))) {
-        cell.classList.add('last-move');
+      if (lastMove && lastMove.from.r === r && lastMove.from.c === c) {
+        const dot = document.createElement('span');
+        dot.className = 'last-move-dot from';
+        cell.appendChild(dot);
+      }
+      if (lastMove && lastMove.to.r === r && lastMove.to.c === c) {
+        const dot = document.createElement('span');
+        dot.className = 'last-move-dot to';
+        cell.appendChild(dot);
       }
       if (checkColor && piece && piece.type === 'k' && piece.color === checkColor) {
         cell.classList.add('check-king');
