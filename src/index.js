@@ -23,6 +23,8 @@ body { font-family: 'Sora', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-
 .home-btn:active { transform: scale(0.97); }
 .home-btn.chess-btn { background: #0f3460; }
 .home-btn.chess-btn:hover { background: #1a4a8a; }
+.home-btn.xiangqi-btn { background: #8B4513; }
+.home-btn.xiangqi-btn:hover { background: #A0522D; }
 </style>
 </head>
 <body>
@@ -32,6 +34,7 @@ body { font-family: 'Sora', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-
   <div class="home-buttons">
     <button class="home-btn" onclick="enterGame('gomoku')">五子棋</button>
     <button class="home-btn chess-btn" onclick="enterGame('chess')">国际象棋</button>
+    <button class="home-btn xiangqi-btn" onclick="enterGame('xiangqi')">中国象棋</button>
   </div>
 </div>
 <script>
@@ -85,6 +88,7 @@ body {
 .header-item span { color: var(--text); font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 13px; }
 .color-black { color: #fff !important; text-shadow: 0 0 6px rgba(255,255,255,0.4); }
 .color-white { color: #e0e0e0 !important; }
+.color-red { color: #ff6b6b !important; }
 
 .player-status { display: flex; gap: 14px; font-size: 11px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; }
 .player-status .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
@@ -138,6 +142,34 @@ body {
 .chess-cell .coord.rank { top: 1px; left: 3px; }
 .chess-cell.light .coord { color: rgba(0,0,0,0.55); }
 .chess-cell.dark .coord { color: rgba(255,255,255,0.7); }
+
+/* 中国象棋棋盘 */
+.board.xiangqi { background: #E8C88C; padding: clamp(4px, 1.2vmin, 10px); border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.4); position: relative; aspect-ratio: 9 / 10; width: auto; height: var(--board-size); max-width: 100%; flex-shrink: 1; min-width: 0; }
+.xiangqi-grid { width: 100%; height: 100%; display: grid; grid-template-columns: repeat(9, 1fr); grid-template-rows: repeat(10, 1fr); gap: 0; position: relative; }
+.xiangqi-cell { width: 100%; height: 100%; position: relative; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+/* 网格线：每个格子的中心画十字交叉线 */
+.xiangqi-cell::before { content: ''; position: absolute; top: 50%; left: 0; right: 0; height: 1.5px; background: rgba(60,30,10,0.7); transform: translateY(-50%); }
+.xiangqi-cell::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1.5px; background: rgba(60,30,10,0.7); transform: translateX(-50%); }
+/* 边界格截断外侧线 */
+.xiangqi-cell.edge-top::before { top: 50%; } /* 顶行：水平线只在下半部分 */
+.xiangqi-cell.edge-bottom::before { bottom: 50%; top: 0; } /* 底行：水平线只在上半部分 */
+.xiangqi-cell.edge-left::after { left: 50%; } /* 左列：竖线只在右半部分 */
+.xiangqi-cell.edge-right::after { right: 50%; left: 0; } /* 右列：竖线只在左半部分 */
+/* 楚河汉界 */
+.xiangqi-river { position: absolute; left: 0; right: 0; top: 40%; height: 20%; display: flex; align-items: center; justify-content: space-around; font-size: calc(var(--board-size) * 0.06); color: rgba(60,30,10,0.5); font-weight: 700; letter-spacing: 0.5em; pointer-events: none; z-index: 1; }
+/* 九宫格斜线 */
+.xiangqi-cell.palace-line-tr::before, .xiangqi-cell.palace-line-bl::before { background: transparent; }
+.xiangqi-palace-diag { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+.xiangqi-palace-diag line { stroke: rgba(60,30,10,0.7); stroke-width: 1.5; }
+/* 棋子 */
+.xiangqi-cell .xpiece { position: relative; z-index: 3; width: 80%; height: 80%; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: calc(var(--board-size) * 0.05); font-family: 'Sora', 'Noto Sans SC', sans-serif; font-weight: 700; line-height: 1; box-shadow: 1px 2px 4px rgba(0,0,0,0.4), inset 0 -2px 4px rgba(0,0,0,0.2); transition: transform 0.15s ease; }
+.xiangqi-cell .xpiece.red { background: radial-gradient(circle at 35% 30%, #fff5e0, #f0d9b5 80%); color: #c0392b; border: 2px solid #c0392b; }
+.xiangqi-cell .xpiece.black { background: radial-gradient(circle at 35% 30%, #fff5e0, #f0d9b5 80%); color: #1a1a1a; border: 2px solid #1a1a1a; }
+.xiangqi-cell.selected .xpiece { transform: translateY(-1px) scale(1.06); box-shadow: 0 0 0 min(0.5vmin,5px) var(--accent), 1px 2px 6px rgba(0,0,0,0.5); }
+.xiangqi-cell.last-move::before { background: rgba(233,69,96,0.5); }
+.xiangqi-cell.check-king .xpiece { box-shadow: 0 0 0 min(0.5vmin,5px) #ff3333, 1px 2px 6px rgba(0,0,0,0.5); }
+.xiangqi-cell .move-dot { position: absolute; width: 28%; height: 28%; border-radius: 50%; background: rgba(60,30,10,0.3); pointer-events: none; z-index: 2; }
+.xiangqi-cell .capture-ring { position: absolute; inset: 8%; border: min(0.5vmin,5px) solid rgba(233,69,96,0.6); border-radius: 50%; box-sizing: border-box; pointer-events: none; z-index: 2; }
 
 .btn { padding: 8px 14px; border: none; border-radius: 8px; font-size: 13px; font-family: 'Sora', sans-serif; font-weight: 600; cursor: pointer; background: var(--accent); color: #fff; transition: background 0.2s, transform 0.1s; letter-spacing: 0.3px; }
 .btn:hover { background: #c73650; }
@@ -206,8 +238,8 @@ body {
     <div class="header-item">回合: <span id="turnInfo">—</span></div>
   </div>
   <div class="player-status" id="playerStatus" style="display:none">
-    <span>黑棋: <span class="status-dot offline" id="blackDot"></span><span id="blackLatency">—</span></span>
-    <span>白棋: <span class="status-dot offline" id="whiteDot"></span><span id="whiteLatency">—</span></span>
+    <span><span id="blackLabel">黑棋</span>: <span class="status-dot offline" id="blackDot"></span><span id="blackLatency">—</span></span>
+    <span><span id="whiteLabel">白棋</span>: <span class="status-dot offline" id="whiteDot"></span><span id="whiteLatency">—</span></span>
   </div>
 </div>
 
@@ -233,6 +265,7 @@ body {
     <select id="rematchGameSelect">
       <option value="gomoku">五子棋</option>
       <option value="chess">国际象棋</option>
+      <option value="xiangqi">中国象棋</option>
     </select>
   </div>
   <div class="rematch-hint" id="rematchHint"></div>
@@ -526,12 +559,278 @@ const Chess = (function() {
   return { getLegalMoves };
 })();
 
+// === 中国象棋规则引擎（前端本地版，与 src/xiangqi.js 同源） ===
+const Xiangqi = (function() {
+  const ROWS = 10, COLS = 9;
+  const ROOK_DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+  const PALACE = {
+    red: { rowMin: 7, rowMax: 9, colMin: 3, colMax: 5 },
+    black: { rowMin: 0, rowMax: 2, colMin: 3, colMax: 5 },
+  };
+  const RIVER_ROW = 4;
+  const inBounds = (r, c) => r >= 0 && r < ROWS && c >= 0 && c < COLS;
+  const opposite = (color) => (color === 'red' ? 'black' : 'red');
+  const inPalace = (r, c, color) => {
+    const p = PALACE[color];
+    return r >= p.rowMin && r <= p.rowMax && c >= p.colMin && c <= p.colMax;
+  };
+  const inOwnHalf = (r, color) => (color === 'red' ? r >= 5 : r <= 4);
+  const isRedPawnCrossed = (r) => r <= RIVER_ROW;
+  const isBlackPawnCrossed = (r) => r >= RIVER_ROW + 1;
+
+  function cloneBoard(board) {
+    return board.map((row) => row.map((cell) => (cell ? { type: cell.type, color: cell.color } : null)));
+  }
+
+  function findGeneral(board, color) {
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const p = board[r][c];
+        if (p && p.type === 'k' && p.color === color) return { r, c };
+      }
+    }
+    return null;
+  }
+
+  function isSquareAttacked(board, r, c, byColor) {
+    for (const [dr, dc] of ROOK_DIRS) {
+      let nr = r + dr, nc = c + dc;
+      let jumped = false;
+      while (inBounds(nr, nc)) {
+        const p = board[nr][nc];
+        if (p) {
+          if (!jumped) {
+            if (p.color === byColor && p.type === 'r') return true;
+            jumped = true;
+          } else {
+            if (p.color === byColor && p.type === 'c') return true;
+            break;
+          }
+        }
+        nr += dr; nc += dc;
+      }
+    }
+    const knightAttacks = [
+      { legOffset: [-1, -1], knightOffset: [-2, -1] },
+      { legOffset: [-1, 1], knightOffset: [-2, 1] },
+      { legOffset: [1, -1], knightOffset: [2, -1] },
+      { legOffset: [1, 1], knightOffset: [2, 1] },
+      { legOffset: [-1, -1], knightOffset: [-1, -2] },
+      { legOffset: [-1, 1], knightOffset: [-1, 2] },
+      { legOffset: [1, -1], knightOffset: [1, -2] },
+      { legOffset: [1, 1], knightOffset: [1, 2] },
+    ];
+    for (const { legOffset, knightOffset } of knightAttacks) {
+      const mr = r + knightOffset[0], mc = c + knightOffset[1];
+      if (!inBounds(mr, mc)) continue;
+      const p = board[mr][mc];
+      if (!p || p.color !== byColor || p.type !== 'h') continue;
+      const lr = r + legOffset[0], lc = c + legOffset[1];
+      if (inBounds(lr, lc) && board[lr][lc]) continue;
+      return true;
+    }
+    if (byColor === 'red') {
+      if (inBounds(r + 1, c)) {
+        const p = board[r + 1][c];
+        if (p && p.color === 'red' && p.type === 'p') return true;
+      }
+      if (r <= RIVER_ROW) {
+        if (inBounds(r, c - 1)) {
+          const p = board[r][c - 1];
+          if (p && p.color === 'red' && p.type === 'p') return true;
+        }
+        if (inBounds(r, c + 1)) {
+          const p = board[r][c + 1];
+          if (p && p.color === 'red' && p.type === 'p') return true;
+        }
+      }
+    } else {
+      if (inBounds(r - 1, c)) {
+        const p = board[r - 1][c];
+        if (p && p.color === 'black' && p.type === 'p') return true;
+      }
+      if (r >= RIVER_ROW + 1) {
+        if (inBounds(r, c - 1)) {
+          const p = board[r][c - 1];
+          if (p && p.color === 'black' && p.type === 'p') return true;
+        }
+        if (inBounds(r, c + 1)) {
+          const p = board[r][c + 1];
+          if (p && p.color === 'black' && p.type === 'p') return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function isInCheck(board, color) {
+    const general = findGeneral(board, color);
+    if (!general) return false;
+    const opp = opposite(color);
+    if (isSquareAttacked(board, general.r, general.c, opp)) return true;
+    const oppGeneral = findGeneral(board, opp);
+    if (oppGeneral && oppGeneral.c === general.c) {
+      let blocked = false;
+      const lo = Math.min(general.r, oppGeneral.r) + 1;
+      const hi = Math.max(general.r, oppGeneral.r);
+      for (let r = lo; r < hi; r++) {
+        if (board[r][general.c]) { blocked = true; break; }
+      }
+      if (!blocked) return true;
+    }
+    return false;
+  }
+
+  function getPseudoLegalMoves(board, r, c, state) {
+    const piece = board[r][c];
+    if (!piece) return [];
+    const color = piece.color;
+    const moves = [];
+    const add = (tr, tc) => {
+      if (!inBounds(tr, tc)) return;
+      const target = board[tr][tc];
+      if (target && target.color === color) return;
+      moves.push({ from: { r, c }, to: { r: tr, c: tc } });
+    };
+    switch (piece.type) {
+      case 'k': {
+        for (const [dr, dc] of ROOK_DIRS) {
+          const tr = r + dr, tc = c + dc;
+          if (!inBounds(tr, tc)) continue;
+          if (!inPalace(tr, tc, color)) continue;
+          add(tr, tc);
+        }
+        break;
+      }
+      case 'a': {
+        for (const [dr, dc] of [[-1, -1], [-1, 1], [1, -1], [1, 1]]) {
+          const tr = r + dr, tc = c + dc;
+          if (!inBounds(tr, tc)) continue;
+          if (!inPalace(tr, tc, color)) continue;
+          add(tr, tc);
+        }
+        break;
+      }
+      case 'e': {
+        for (const [dr, dc] of [[-2, -2], [-2, 2], [2, -2], [2, 2]]) {
+          const tr = r + dr, tc = c + dc;
+          if (!inBounds(tr, tc)) continue;
+          if (!inOwnHalf(tr, color)) continue;
+          const er = r + dr / 2, ec = c + dc / 2;
+          if (board[er][ec]) continue;
+          add(tr, tc);
+        }
+        break;
+      }
+      case 'h': {
+        const horseMoves = [
+          { to: [-1, -2], leg: [0, -1] }, { to: [-1, 2], leg: [0, 1] },
+          { to: [1, -2], leg: [0, -1] }, { to: [1, 2], leg: [0, 1] },
+          { to: [-2, -1], leg: [-1, 0] }, { to: [-2, 1], leg: [-1, 0] },
+          { to: [2, -1], leg: [1, 0] }, { to: [2, 1], leg: [1, 0] },
+        ];
+        for (const { to, leg } of horseMoves) {
+          const tr = r + to[0], tc = c + to[1];
+          if (!inBounds(tr, tc)) continue;
+          const lr = r + leg[0], lc = c + leg[1];
+          if (board[lr][lc]) continue;
+          add(tr, tc);
+        }
+        break;
+      }
+      case 'r': {
+        for (const [dr, dc] of ROOK_DIRS) {
+          let nr = r + dr, nc = c + dc;
+          while (inBounds(nr, nc)) {
+            const target = board[nr][nc];
+            if (target) {
+              if (target.color !== color) moves.push({ from: { r, c }, to: { r: nr, c: nc } });
+              break;
+            }
+            moves.push({ from: { r, c }, to: { r: nr, c: nc } });
+            nr += dr; nc += dc;
+          }
+        }
+        break;
+      }
+      case 'c': {
+        for (const [dr, dc] of ROOK_DIRS) {
+          let nr = r + dr, nc = c + dc;
+          let jumped = false;
+          while (inBounds(nr, nc)) {
+            const target = board[nr][nc];
+            if (!jumped) {
+              if (target) {
+                jumped = true;
+              } else {
+                moves.push({ from: { r, c }, to: { r: nr, c: nc } });
+              }
+            } else {
+              if (target) {
+                if (target.color !== color) {
+                  moves.push({ from: { r, c }, to: { r: nr, c: nc } });
+                }
+                break;
+              }
+            }
+            nr += dr; nc += dc;
+          }
+        }
+        break;
+      }
+      case 'p': {
+        const dir = color === 'red' ? -1 : 1;
+        const crossed = color === 'red' ? isRedPawnCrossed(r) : isBlackPawnCrossed(r);
+        add(r + dir, c);
+        if (crossed) {
+          add(r, c - 1);
+          add(r, c + 1);
+        }
+        break;
+      }
+    }
+    return moves;
+  }
+
+  function applyMove(board, move, state) {
+    const newBoard = cloneBoard(board);
+    const piece = newBoard[move.from.r][move.from.c];
+    let captured = null;
+    if (newBoard[move.to.r][move.to.c]) {
+      captured = newBoard[move.to.r][move.to.c];
+    }
+    newBoard[move.to.r][move.to.c] = piece;
+    newBoard[move.from.r][move.from.c] = null;
+    return { board: newBoard, newState: state, captured };
+  }
+
+  function getLegalMoves(board, r, c, state) {
+    const piece = board[r][c];
+    if (!piece) return [];
+    const color = piece.color;
+    const pseudo = getPseudoLegalMoves(board, r, c, state);
+    const legal = [];
+    for (const move of pseudo) {
+      const next = applyMove(board, move, state).board;
+      if (!isInCheck(next, color)) legal.push(move);
+    }
+    return legal;
+  }
+
+  return { getLegalMoves };
+})();
+
 const ROWS = 15, COLS = 15;
 const CHESS_GLYPHS = {
   // 白黑双方统一使用实心字形（U+265A..F），靠 CSS 颜色与描边区分，
   // 形状完全对称，避免空心字形在不同字体下细节缺失。
   white: { k:'\\u265A', q:'\\u265B', r:'\\u265C', b:'\\u265D', n:'\\u265E', p:'\\u265F' },
   black: { k:'\\u265A', q:'\\u265B', r:'\\u265C', b:'\\u265D', n:'\\u265E', p:'\\u265F' }
+};
+// 中国象棋棋子字符：红方用帅仕相马车炮兵，黑方用将士象马车炮卒
+const XIANGQI_GLYPHS = {
+  red:   { k:'帅', a:'仕', e:'相', h:'马', r:'车', c:'炮', p:'兵' },
+  black: { k:'将', a:'士', e:'象', h:'马', r:'车', c:'炮', p:'卒' }
 };
 
 let gameType = 'gomoku';
@@ -547,6 +846,11 @@ let chessState = null;       // 与服务端同步的规则状态（易位权、
 let chessSelected = null;
 let chessLegalMoves = [];
 let chessFlipped = false;
+let xiangqiBoardData = null;
+let xiangqiState = null;
+let xiangqiSelected = null;
+let xiangqiLegalMoves = [];
+let xiangqiFlipped = false;
 let lastMove = null;
 let checkColor = null;
 let rematchRole = null; // 'requester' | 'accepter' | null
@@ -569,7 +873,7 @@ function init() {
     return;
   }
   const g = params.get('game');
-  gameType = (g === 'chess') ? 'chess' : 'gomoku';
+  gameType = (g === 'chess') ? 'chess' : (g === 'xiangqi') ? 'xiangqi' : 'gomoku';
   document.getElementById('roomId').textContent = roomId;
   // 先启动 WebSocket 连接（与 DOM 构建并行，减少首次交互延迟）
   connect();
@@ -582,6 +886,9 @@ function buildBoard() {
   if (gameType === 'chess') {
     boardEl.className = 'board chess';
     renderChess();
+  } else if (gameType === 'xiangqi') {
+    boardEl.className = 'board xiangqi';
+    renderXiangqi();
   } else {
     boardEl.className = 'board';
     buildGomokuBoard();
@@ -608,6 +915,7 @@ function buildGomokuBoard() {
 
 function renderBoard() {
   if (gameType === 'chess') renderChess();
+  else if (gameType === 'xiangqi') renderXiangqi();
   else renderGomoku();
 }
 
@@ -790,26 +1098,180 @@ function sendChessMove(move, promotionPiece) {
   renderChess();
 }
 
+// === 中国象棋渲染与交互 ===
+function renderXiangqi() {
+  const boardEl = document.getElementById('board');
+  boardEl.innerHTML = '';
+  const grid = document.createElement('div');
+  grid.className = 'xiangqi-grid';
+
+  const rows = xiangqiFlipped ? [9,8,7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7,8,9];
+  const cols = xiangqiFlipped ? [8,7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7,8];
+  const leftmostCol = xiangqiFlipped ? 8 : 0;
+  const bottomRow = xiangqiFlipped ? 0 : 9;
+
+  for (const r of rows) {
+    for (const c of cols) {
+      const cell = document.createElement('div');
+      cell.className = 'xiangqi-cell';
+      cell.dataset.row = r;
+      cell.dataset.col = c;
+
+      // 边界格截断外侧网格线
+      const visualR = xiangqiFlipped ? 9 - r : r;
+      const visualC = xiangqiFlipped ? 8 - c : c;
+      if (visualR === 0) cell.classList.add('edge-top');
+      if (visualR === 9) cell.classList.add('edge-bottom');
+      if (visualC === 0) cell.classList.add('edge-left');
+      if (visualC === 8) cell.classList.add('edge-right');
+
+      const piece = (xiangqiBoardData && xiangqiBoardData[r]) ? xiangqiBoardData[r][c] : null;
+      if (piece && XIANGQI_GLYPHS[piece.color] && XIANGQI_GLYPHS[piece.color][piece.type]) {
+        const span = document.createElement('span');
+        span.className = 'xpiece ' + piece.color;
+        span.textContent = XIANGQI_GLYPHS[piece.color][piece.type];
+        cell.appendChild(span);
+      }
+
+      if (xiangqiSelected && xiangqiSelected.r === r && xiangqiSelected.c === c) {
+        cell.classList.add('selected');
+      }
+      if (lastMove && ((lastMove.from.r === r && lastMove.from.c === c) || (lastMove.to.r === r && lastMove.to.c === c))) {
+        cell.classList.add('last-move');
+      }
+      if (checkColor && piece && piece.type === 'k' && piece.color === checkColor) {
+        cell.classList.add('check-king');
+      }
+
+      const moveTo = xiangqiLegalMoves.find(m => m.to.r === r && m.to.c === c);
+      if (moveTo) {
+        if (piece) {
+          const ring = document.createElement('span');
+          ring.className = 'capture-ring';
+          cell.appendChild(ring);
+        } else {
+          const dot = document.createElement('span');
+          dot.className = 'move-dot';
+          cell.appendChild(dot);
+        }
+      }
+
+      cell.addEventListener('click', () => onXiangqiCellClick(r, c));
+      grid.appendChild(cell);
+    }
+  }
+
+  // 楚河汉界
+  const river = document.createElement('div');
+  river.className = 'xiangqi-river';
+  river.textContent = '楚 河          汉 界';
+  grid.appendChild(river);
+
+  // 九宫格斜线（SVG 叠加层）
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'xiangqi-palace-diag');
+  svg.setAttribute('viewBox', '0 0 9 10');
+  svg.setAttribute('preserveAspectRatio', 'none');
+  // 黑方九宫格 (row 0-2, col 3-5): 对角线 (0,3)-(2,5) 和 (0,5)-(2,3)
+  // 红方九宫格 (row 7-9, col 3-5): 对角线 (7,3)-(9,5) 和 (7,5)-(9,3)
+  // col 映射到 viewBox: 不翻转时 col 直接用；翻转时需映射
+  const palaces = [
+    { r1: 0, c1: 3, r2: 2, c2: 5 },
+    { r1: 0, c1: 5, r2: 2, c2: 3 },
+    { r1: 7, c1: 3, r2: 9, c2: 5 },
+    { r1: 7, c1: 5, r2: 9, c2: 3 },
+  ];
+  for (const p of palaces) {
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    const x1 = xiangqiFlipped ? 8 - p.c1 : p.c1;
+    const y1 = xiangqiFlipped ? 9 - p.r1 : p.r1;
+    const x2 = xiangqiFlipped ? 8 - p.c2 : p.c2;
+    const y2 = xiangqiFlipped ? 9 - p.r2 : p.r2;
+    line.setAttribute('x1', x1 + 0.5);
+    line.setAttribute('y1', y1 + 0.5);
+    line.setAttribute('x2', x2 + 0.5);
+    line.setAttribute('y2', y2 + 0.5);
+    svg.appendChild(line);
+  }
+  grid.appendChild(svg);
+
+  boardEl.appendChild(grid);
+}
+
+function onXiangqiCellClick(r, c) {
+  if (gameOver || !myColor || myColor !== currentTurn) return;
+  if (!xiangqiBoardData) return;
+
+  const piece = xiangqiBoardData[r][c];
+
+  if (xiangqiSelected) {
+    const move = xiangqiLegalMoves.find(m => m.to.r === r && m.to.c === c);
+    if (move) {
+      sendXiangqiMove(move);
+      return;
+    }
+  }
+
+  if (piece && piece.color === myColor) {
+    xiangqiSelected = { r, c };
+    try {
+      xiangqiLegalMoves = Xiangqi.getLegalMoves(xiangqiBoardData, r, c, xiangqiState);
+    } catch {
+      xiangqiLegalMoves = [];
+    }
+    renderXiangqi();
+  } else {
+    xiangqiSelected = null;
+    xiangqiLegalMoves = [];
+    renderXiangqi();
+  }
+}
+
+function sendXiangqiMove(move) {
+  if (!ws || ws.readyState !== 1) return;
+  const payload = { type: 'move', from: { r: move.from.r, c: move.from.c }, to: { r: move.to.r, c: move.to.c } };
+  ws.send(JSON.stringify(payload));
+  xiangqiSelected = null;
+  xiangqiLegalMoves = [];
+  renderXiangqi();
+}
+
+function colorLabel(color) {
+  if (color === 'red') return '红棋';
+  if (color === 'black') return '黑棋';
+  if (color === 'white') return '白棋';
+  return color;
+}
+
 function updateHeader() {
   const colorEl = document.getElementById('myColor');
   if (myColor) {
-    colorEl.textContent = myColor === 'black' ? '黑棋' : '白棋';
+    colorEl.textContent = colorLabel(myColor);
     colorEl.className = 'color-' + myColor;
   } else {
     colorEl.textContent = '—';
     colorEl.className = '';
   }
   const turnEl = document.getElementById('turnInfo');
-  turnEl.textContent = gameOver ? '已结束' : (currentTurn === 'black' ? '黑棋' : '白棋');
+  turnEl.textContent = gameOver ? '已结束' : colorLabel(currentTurn);
 }
 
 function updateStatus(msg) {
   document.getElementById('playerStatus').style.display = 'flex';
   var players = msg.players;
-  ['black', 'white'].forEach(function(color) {
-    var dot = document.getElementById(color + 'Dot');
-    var latEl = document.getElementById(color + 'Latency');
-    var p = players[color];
+  // 第二色（先手为黑时是 white，先手为红时是 red）
+  var secondColor = (gameType === 'xiangqi') ? 'red' : 'white';
+  var blackLabelEl = document.getElementById('blackLabel');
+  var whiteLabelEl = document.getElementById('whiteLabel');
+  if (blackLabelEl) blackLabelEl.textContent = '黑棋';
+  if (whiteLabelEl) whiteLabelEl.textContent = (gameType === 'xiangqi') ? '红棋' : '白棋';
+  // black 总是映射到 blackDot/blackLatency；第二色映射到 whiteDot/whiteLatency
+  var pairs = [['black', 'black'], [secondColor, 'white']];
+  pairs.forEach(function(pair) {
+    var srcColor = pair[0], domKey = pair[1];
+    var dot = document.getElementById(domKey + 'Dot');
+    var latEl = document.getElementById(domKey + 'Latency');
+    var p = players[srcColor];
     if (p) {
       dot.className = 'status-dot ' + (p.online ? 'online' : 'offline');
       var lat = p.latency;
@@ -881,9 +1343,13 @@ function connect() {
           gameType = msg.gameType;
         }
         chessFlipped = (gameType === 'chess' && myColor === 'black');
+        xiangqiFlipped = (gameType === 'xiangqi' && myColor === 'black');
         chessSelected = null;
         chessLegalMoves = [];
         chessState = null;
+        xiangqiSelected = null;
+        xiangqiLegalMoves = [];
+        xiangqiState = null;
         checkColor = null;
         rematchRole = null;
         gameOver = false;
@@ -902,18 +1368,22 @@ function connect() {
         if (gameType === 'chess') {
           chessBoardData = msg.board;
           lastMove = msg.lastMove || null;
-          // 同步规则状态：服务端权威，前端用于本地计算合法走法
           chessState = msg.chessState || null;
-          // 棋盘已变，原选中与走法作废（除非用户刚刚又点了同一棋子，那会在点击处理里重置）
           chessSelected = null;
           chessLegalMoves = [];
+        } else if (gameType === 'xiangqi') {
+          xiangqiBoardData = msg.board;
+          lastMove = msg.lastMove || null;
+          xiangqiState = msg.xiangqiState || null;
+          xiangqiSelected = null;
+          xiangqiLegalMoves = [];
         } else {
           boardData = msg.board;
         }
         currentTurn = msg.currentTurn;
         gameOver = msg.gameOver;
         draw = !!msg.draw;
-        checkColor = null; // 新局面清除将军高亮（如仍被将军，后续 check 消息会重新设置）
+        checkColor = null;
         renderBoard();
         updateHeader();
         if (!gameOver && myColor) {
@@ -953,7 +1423,7 @@ function connect() {
         // 对方请求再来一局，弹窗显示对方选择的棋种，我方只点同意/拒绝
         rematchRole = 'accepter';
         document.getElementById('rematchWaiting').classList.add('hidden');
-        const gameName = msg.gameType === 'chess' ? '国际象棋' : '五子棋';
+        const gameName = msg.gameType === 'chess' ? '国际象棋' : (msg.gameType === 'xiangqi' ? '中国象棋' : '五子棋');
         document.getElementById('rematchModalText').textContent = '对方申请在下一盘' + gameName;
         document.getElementById('rematchModal').classList.remove('hidden');
         break;

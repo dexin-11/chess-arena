@@ -1,13 +1,16 @@
 import * as Chess from './chess.js';
+import * as Xiangqi from './xiangqi.js';
 
 export class Room {
   constructor(state, env) {
     this.state = state;
     this.env = env;
-    this.gameType = null; // 'gomoku' | 'chess'，首次连接时确定
+    this.gameType = null; // 'gomoku' | 'chess' | 'xiangqi'，首次连接时确定
     this.board = Array.from({ length: 15 }, () => Array(15).fill(null));
     this.chessBoard = null;
     this.chessState = null;
+    this.xiangqiBoard = null;
+    this.xiangqiState = null;
     this.lastMove = null;
     this.draw = false;
     this.connections = new Map(); // wsId -> { ws, color, latency, online }
@@ -38,7 +41,9 @@ export class Room {
     let gameTypeFromUrl = 'gomoku';
     try {
       const url = new URL(request.url);
-      if (url.searchParams.get('game') === 'chess') gameTypeFromUrl = 'chess';
+      const g = url.searchParams.get('game');
+      if (g === 'chess') gameTypeFromUrl = 'chess';
+      else if (g === 'xiangqi') gameTypeFromUrl = 'xiangqi';
     } catch {
       // 忽略 URL 解析错误，使用默认值
     }
@@ -61,6 +66,9 @@ export class Room {
       if (this.gameType === 'chess') {
         this.initChessState();
         this.currentTurn = 'white'; // 国际象棋白方先行
+      } else if (this.gameType === 'xiangqi') {
+        this.initXiangqiState();
+        this.currentTurn = 'red'; // 中国象棋红方先行
       }
     }
 
@@ -78,25 +86,27 @@ export class Room {
 
     if (this.blackPlayer !== null) {
       // 游戏已开始，这是重连
+      const colors = this.playerColors();
       const connectedColors = new Set();
       for (const [, c] of this.connections) {
         if (c.color) connectedColors.add(c.color);
       }
 
       let assignedColor = null;
-      if (!connectedColors.has('black')) assignedColor = 'black';
-      else if (!connectedColors.has('white')) assignedColor = 'white';
+      for (const color of colors) {
+        if (!connectedColors.has(color)) { assignedColor = color; break; }
+      }
 
       if (assignedColor) {
         const conn = this.connections.get(wsId);
         conn.color = assignedColor;
-        if (assignedColor === 'black') this.blackPlayer = wsId;
+        if (assignedColor === colors[0]) this.blackPlayer = wsId;
         else this.whitePlayer = wsId;
 
         this.sendMessage(conn.ws, {
           type: 'colorAssign',
           you: assignedColor,
-          opponent: assignedColor === 'black' ? 'white' : 'black',
+          opponent: assignedColor === colors[0] ? colors[1] : colors[0],
           gameType: this.gameType,
         });
         this.broadcastSync();
@@ -114,6 +124,13 @@ export class Room {
     }
   }
 
+  // 返回当前棋种的两色 [先手色, 后手色]。
+  playerColors() {
+    if (this.gameType === 'chess') return ['white', 'black'];
+    if (this.gameType === 'xiangqi') return ['red', 'black'];
+    return ['black', 'white']; // 五子棋黑方先行
+  }
+
   initChessState() {
     this.chessBoard = Chess.initialBoard();
     this.chessState = {
@@ -127,19 +144,21 @@ export class Room {
 
   assignColors() {
     const ids = [...this.connections.keys()];
-    const blackIdx = Math.random() < 0.5 ? 0 : 1;
-    const blackId = ids[blackIdx];
-    const whiteId = ids[1 - blackIdx];
+    const colors = this.playerColors();
+    const firstIdx = Math.random() < 0.5 ? 0 : 1;
+    const firstId = ids[firstIdx];
+    const secondId = ids[1 - firstIdx];
 
-    this.blackPlayer = blackId;
-    this.whitePlayer = whiteId;
+    this.blackPlayer = firstId;
+    this.whitePlayer = secondId;
 
     for (const [id, conn] of this.connections) {
-      conn.color = id === blackId ? 'black' : 'white';
+      const isFirst = id === firstId;
+      conn.color = isFirst ? colors[0] : colors[1];
       this.sendMessage(conn.ws, {
         type: 'colorAssign',
         you: conn.color,
-        opponent: id === blackId ? 'white' : 'black',
+        opponent: isFirst ? colors[1] : colors[0],
         gameType: this.gameType,
       });
     }
@@ -172,6 +191,7 @@ export class Room {
       case 'move':
         if (!conn.color) return;
         if (this.gameType === 'chess') this.handleChessMove(wsId, msg);
+        else if (this.gameType === 'xiangqi') this.handleXiangqiMove(wsId, msg);
         else this.handleMove(wsId, msg);
         break;
 
@@ -292,6 +312,66 @@ export class Room {
       this.broadcastSync();
       // 非将杀的将军：sync 之后发送 check 通知，客户端据此高亮被将军的王
       if (Chess.isInCheck(this.chessBoard, opponentColor)) {
+        this.broadcast({ type: 'check', color: opponentColor });
+      }
+    }
+  }
+
+  initXiangqiState() {
+    this.xiangqiBoard = Xiangqi.initialBoard();
+    this.xiangqiState = null; // 中国象棋规则引擎当前无需额外状态，保留字段以便与 chess 分支同构
+  }
+
+  handleXiangqiMove(wsId, msg) {
+    if (this.gameOver) return;
+
+    const conn = this.connections.get(wsId);
+    if (!conn || conn.color !== this.currentTurn) return;
+    if (!this.xiangqiBoard) return;
+
+    const from = msg.from, to = msg.to;
+    if (!from || !to) return;
+    if (!Number.isInteger(from.r) || !Number.isInteger(from.c) ||
+        !Number.isInteger(to.r) || !Number.isInteger(to.c)) return;
+    if (from.r < 0 || from.r > 9 || from.c < 0 || from.c > 8 ||
+        to.r < 0 || to.r > 9 || to.c < 0 || to.c > 8) return;
+
+    const piece = this.xiangqiBoard[from.r][from.c];
+    if (!piece || piece.color !== conn.color) return;
+
+    const legalMoves = Xiangqi.getLegalMoves(this.xiangqiBoard, from.r, from.c, this.xiangqiState);
+    const matched = legalMoves.find(
+      (m) =>
+        m.from.r === from.r && m.from.c === from.c &&
+        m.to.r === to.r && m.to.c === to.c
+    );
+    if (!matched) return;
+
+    const result = Xiangqi.applyMove(this.xiangqiBoard, matched, this.xiangqiState);
+    this.xiangqiBoard = result.board;
+    this.xiangqiState = result.newState;
+    this.lastMove = { from: { r: matched.from.r, c: matched.from.c }, to: { r: matched.to.r, c: matched.to.c } };
+
+    const opponentColor = conn.color === 'red' ? 'black' : 'red';
+    this.currentTurn = opponentColor;
+
+    if (Xiangqi.isCheckmate(this.xiangqiBoard, opponentColor, this.xiangqiState)) {
+      this.gameOver = true;
+      this.winner = conn.color;
+      this.draw = false;
+      this.broadcast({ type: 'gameOver', winner: conn.color, draw: false });
+      this.broadcastSync();
+    } else if (Xiangqi.isStalemate(this.xiangqiBoard, opponentColor, this.xiangqiState)) {
+      // 困毙判负（中国象棋规则）
+      this.gameOver = true;
+      this.winner = conn.color;
+      this.draw = false;
+      this.broadcast({ type: 'gameOver', winner: conn.color, draw: false });
+      this.broadcastSync();
+    } else {
+      this.broadcastSync();
+      // 非将杀的将军：sync 之后发送 check 通知，客户端据此高亮被将军的将/帅
+      if (Xiangqi.isInCheck(this.xiangqiBoard, opponentColor)) {
         this.broadcast({ type: 'check', color: opponentColor });
       }
     }
@@ -419,7 +499,9 @@ export class Room {
   }
 
   normalizeGameType(gt) {
-    return gt === 'chess' ? 'chess' : 'gomoku';
+    if (gt === 'chess') return 'chess';
+    if (gt === 'xiangqi') return 'xiangqi';
+    return 'gomoku';
   }
 
   restartGame(newGameType) {
@@ -427,6 +509,9 @@ export class Room {
     if (this.gameType === 'chess') {
       this.initChessState();
       this.currentTurn = 'white';
+    } else if (this.gameType === 'xiangqi') {
+      this.initXiangqiState();
+      this.currentTurn = 'red';
     } else {
       this.board = Array.from({ length: 15 }, () => Array(15).fill(null));
       this.currentTurn = 'black';
@@ -441,10 +526,14 @@ export class Room {
   }
 
   broadcastSync() {
+    let board;
+    if (this.gameType === 'chess') board = this.chessBoard;
+    else if (this.gameType === 'xiangqi') board = this.xiangqiBoard;
+    else board = this.board;
     const payload = {
       type: 'sync',
       gameType: this.gameType,
-      board: this.gameType === 'chess' ? this.chessBoard : this.board,
+      board,
       currentTurn: this.currentTurn,
       gameOver: this.gameOver,
       winner: this.winner,
@@ -454,6 +543,9 @@ export class Room {
       payload.lastMove = this.lastMove;
       // 把规则状态一并下发，供客户端本地计算合法走法（避免每次选中棋子都 RTT）
       payload.chessState = this.chessState;
+    } else if (this.gameType === 'xiangqi') {
+      payload.lastMove = this.lastMove;
+      payload.xiangqiState = this.xiangqiState;
     }
     this.broadcast(payload);
   }
