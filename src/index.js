@@ -122,6 +122,11 @@ body {
 
 .cell.disabled { cursor: default; }
 .cell.disabled .preview { display: none; }
+.cell.last-move .stone.black { box-shadow: 0 0 0 min(0.4vmin, 4px) var(--accent), 1px 2px 4px rgba(0,0,0,0.6), inset 0 -2px 4px rgba(0,0,0,0.5); }
+.cell.last-move .stone.white { box-shadow: 0 0 0 min(0.4vmin, 4px) var(--accent), 1px 2px 4px rgba(0,0,0,0.4), inset 0 -2px 4px rgba(0,0,0,0.2); }
+.cell .coord { position: absolute; font-size: min(1.6vmin, 10px); font-family: 'JetBrains Mono', monospace; font-weight: 700; pointer-events: none; color: rgba(60,30,10,0.55); z-index: 1; }
+.cell .coord.file { bottom: 1px; right: 3px; }
+.cell .coord.rank { top: 1px; left: 3px; }
 
 /* 国际象棋棋盘 */
 .chess-grid { width: 100%; height: 100%; display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); gap: 0; }
@@ -133,7 +138,7 @@ body {
 .chess-cell .piece.black { color: #1a1a1a; text-shadow: 0 0 1px rgba(255,255,255,0.22), 0 2px 3px rgba(0,0,0,0.5); }
 .chess-cell.selected .piece { transform: translateY(-1px) scale(1.04); }
 .chess-cell.selected { box-shadow: inset 0 0 0 min(0.4vmin, 4px) var(--accent); }
-.chess-cell.last-move { box-shadow: inset 0 0 0 min(0.4vmin, 4px) rgba(255, 213, 79, 0.85); }
+.chess-cell.last-move { box-shadow: inset 0 0 0 min(0.4vmin, 4px) rgba(233, 69, 96, 0.85); }
 .chess-cell.check-king { box-shadow: inset 0 0 0 min(0.4vmin, 4px) #ff3333; background: #ff6666 !important; }
 .chess-cell .move-dot { position: absolute; width: 32%; height: 32%; border-radius: 50%; background: rgba(0,0,0,0.28); pointer-events: none; z-index: 1; }
 .chess-cell .capture-ring { position: absolute; inset: 6%; border: min(0.4vmin, 4px) solid rgba(0,0,0,0.32); border-radius: 50%; box-sizing: border-box; pointer-events: none; z-index: 1; }
@@ -174,11 +179,15 @@ body {
 .xiangqi-cell .xpiece::before { content: ''; position: absolute; inset: 7%; border-radius: 50%; border: 1.5px solid currentColor; opacity: 0.45; pointer-events: none; }
 .xiangqi-cell .xpiece.red { color: #b91c1c; border: 2px solid #7f1d1d; text-shadow: 0 1px 0 rgba(255,250,235,0.5); }
 .xiangqi-cell .xpiece.black { color: #1f1f1f; border: 2px solid #0a0a0a; text-shadow: 0 1px 0 rgba(255,250,235,0.4); }
-.xiangqi-cell.selected .xpiece { transform: translateY(-1px) scale(1.06); box-shadow: 0 0 0 min(0.5vmin,5px) var(--accent), 0 3px 7px rgba(60,30,10,0.5), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); }
-.xiangqi-cell.last-move .xpiece { box-shadow: 0 0 0 min(0.5vmin,5px) rgba(255, 213, 79, 0.85), 0 3px 7px rgba(60,30,10,0.5), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); }
+.xiangqi-cell.selected { box-shadow: inset 0 0 0 min(0.4vmin, 4px) var(--accent); }
+.xiangqi-cell.selected .xpiece { transform: translateY(-1px) scale(1.04); box-shadow: inset 0 0 0 min(0.4vmin,4px) var(--accent), 0 3px 7px rgba(60,30,10,0.5), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); }
+.xiangqi-cell.last-move { box-shadow: inset 0 0 0 min(0.4vmin, 4px) rgba(233, 69, 96, 0.85); }
 .xiangqi-cell.check-king .xpiece { box-shadow: 0 0 0 min(0.5vmin,5px) #ff3333, 0 3px 7px rgba(60,30,10,0.5), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); }
 .xiangqi-cell .move-dot { position: absolute; width: 26%; height: 26%; border-radius: 50%; background: rgba(60,30,10,0.3); pointer-events: none; z-index: 2; }
 .xiangqi-cell .capture-ring { position: absolute; inset: 7%; border: min(0.5vmin,5px) solid rgba(233,69,96,0.6); border-radius: 50%; box-sizing: border-box; pointer-events: none; z-index: 2; }
+.xiangqi-cell .coord { position: absolute; font-size: min(1.6vmin, 10px); font-family: 'JetBrains Mono', monospace; font-weight: 700; pointer-events: none; color: rgba(60,30,10,0.55); z-index: 2; }
+.xiangqi-cell .coord.file { bottom: 1px; right: 3px; }
+.xiangqi-cell .coord.rank { top: 1px; left: 3px; }
 
 .btn { padding: 8px 14px; border: none; border-radius: 8px; font-size: 13px; font-family: 'Sora', sans-serif; font-weight: 600; cursor: pointer; background: var(--accent); color: #fff; transition: background 0.2s, transform 0.1s; letter-spacing: 0.3px; }
 .btn:hover { background: #c73650; }
@@ -860,6 +869,7 @@ let xiangqiState = null;
 let xiangqiSelected = null;
 let xiangqiLegalMoves = [];
 let xiangqiFlipped = false;
+let gomokuFlipped = false;
 let lastMove = null;
 let checkColor = null;
 let rematchRole = null; // 'requester' | 'accepter' | null
@@ -907,8 +917,12 @@ function buildBoard() {
 function buildGomokuBoard() {
   const grid = document.createElement('div');
   grid.className = 'board-grid';
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
+  const rows = gomokuFlipped ? [14,13,12,11,10,9,8,7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14];
+  const cols = gomokuFlipped ? [14,13,12,11,10,9,8,7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14];
+  const leftmostCol = gomokuFlipped ? 14 : 0;
+  const bottomRow = gomokuFlipped ? 0 : 14;
+  for (const r of rows) {
+    for (const c of cols) {
       const cell = document.createElement('div');
       cell.className = 'cell';
       cell.dataset.row = r;
@@ -916,6 +930,21 @@ function buildGomokuBoard() {
       cell.addEventListener('click', () => onGomokuCellClick(r, c));
       cell.addEventListener('mouseenter', () => onCellHover(r, c, cell));
       cell.addEventListener('mouseleave', () => onCellLeave(cell));
+      // 坐标标签（Task 6 会用到）
+      if (c === leftmostCol) {
+        const rank = document.createElement('span');
+        rank.className = 'coord rank';
+        // 五子棋行号：不翻转时 row 0 -> "1"，row 14 -> "15"；翻转时 row 0 显示在底部 -> "15"
+        rank.textContent = gomokuFlipped ? String(15 - r) : String(r + 1);
+        cell.appendChild(rank);
+      }
+      if (r === bottomRow) {
+        const file = document.createElement('span');
+        file.className = 'coord file';
+        // 五子棋列字母 A-O：不翻转时 col 0 -> "A"，col 14 -> "O"；翻转时 col 0 显示在右侧 -> "O"
+        file.textContent = String.fromCharCode(65 + (gomokuFlipped ? 14 - c : c));
+        cell.appendChild(file);
+      }
       grid.appendChild(cell);
     }
   }
@@ -1036,6 +1065,8 @@ function renderXiangqiMove(from, to) {
 }
 
 function renderGomokuMove(row, col, color) {
+  // 清除上一帧 last-move 高亮
+  document.querySelectorAll('.cell.last-move').forEach((el) => el.classList.remove('last-move'));
   const cell = getCell(row, col);
   if (!cell) return;
   if (boardData[row][col]) {
@@ -1048,6 +1079,8 @@ function renderGomokuMove(row, col, color) {
     }
     cell.classList.add('disabled');
   }
+  // 添加 last-move 高亮
+  cell.classList.add('last-move');
   // 移除 hover 预览
   const preview = cell.querySelector('.preview');
   if (preview) preview.remove();
@@ -1058,6 +1091,12 @@ function renderGomoku() {
     for (let c = 0; c < COLS; c++) {
       const cell = getCell(r, c);
       if (!cell) continue;
+      // last-move 高亮
+      if (lastMove && lastMove.row === r && lastMove.col === c) {
+        cell.classList.add('last-move');
+      } else {
+        cell.classList.remove('last-move');
+      }
       const existing = cell.querySelector('.stone');
       if (boardData[r][c]) {
         if (!existing || existing.className !== 'stone ' + boardData[r][c]) {
@@ -1289,6 +1328,26 @@ function renderXiangqi() {
         }
       }
 
+      // 坐标标签
+      if (c === leftmostCol) {
+        const rank = document.createElement('span');
+        rank.className = 'coord rank';
+        // 中国象棋行号：红方在下为 1（即 row 9 -> "1"），黑方在上为 10（即 row 0 -> "10"）
+        // 不翻转时：row r -> String(10 - r)
+        // 翻转时：row r 显示在视觉位置 (9-r)，视觉位置对应的逻辑行号还是 10-r
+        rank.textContent = String(10 - r);
+        cell.appendChild(rank);
+      }
+      if (r === bottomRow) {
+        const file = document.createElement('span');
+        file.className = 'coord file';
+        // 中国象棋列号：红方右侧为 1（即 col 8 -> "1"），红方左侧为 9（即 col 0 -> "9"）
+        // 不翻转时：col c -> String(9 - c)
+        // 翻转时：col c 显示在视觉位置 (8-c)，但逻辑列号还是 9-c
+        file.textContent = String(9 - c);
+        cell.appendChild(file);
+      }
+
       cell.addEventListener('click', () => onXiangqiCellClick(r, c));
       grid.appendChild(cell);
     }
@@ -1482,6 +1541,7 @@ function connect() {
         }
         chessFlipped = (gameType === 'chess' && myColor === 'black');
         xiangqiFlipped = (gameType === 'xiangqi' && myColor === 'black');
+        gomokuFlipped = (gameType === 'gomoku' && myColor === 'white');
         chessSelected = null;
         chessLegalMoves = [];
         chessState = null;
@@ -1517,6 +1577,7 @@ function connect() {
           xiangqiLegalMoves = [];
         } else {
           boardData = msg.board;
+          lastMove = msg.lastMove || null;
         }
         currentTurn = msg.currentTurn;
         gameOver = msg.gameOver;
