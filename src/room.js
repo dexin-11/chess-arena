@@ -497,15 +497,21 @@ export class Room {
     if (!conn) return;
 
     const gameType = this.normalizeGameType(msg && msg.gameType);
-    this.rematchVotes.set(wsId, gameType);
 
-    // 双方几乎同时点 request：比较棋种，一致就开新局，不一致提示重选
-    if (this.bothVoted()) {
-      this.resolveRematch();
+    // 先申请者锁定为请求方：若已有对方申请在先，本次申请视为"被请求方"，
+    // 不写入 votes，直接给本次申请方发 rematchRequest（带先申请者的棋种），
+    // 让其走同意/拒绝流程。
+    let priorVote = null;
+    for (const [id, gt] of this.rematchVotes) {
+      if (id !== wsId) { priorVote = gt; break; }
+    }
+    if (priorVote) {
+      this.sendMessage(conn.ws, { type: 'rematchRequest', gameType: priorVote });
       return;
     }
 
-    // 仅一方投票：通知对方，带上请求方选择的棋种，对方无需再选
+    // 本方为先申请者：记录棋种，通知对方
+    this.rematchVotes.set(wsId, gameType);
     for (const [id, c] of this.connections) {
       if (id !== wsId) {
         this.sendMessage(c.ws, { type: 'rematchRequest', gameType: gameType });
@@ -539,25 +545,6 @@ export class Room {
         this.sendMessage(c.ws, { type: 'rematchDecline' });
       }
     }
-  }
-
-  // 两端均已投票时比较棋种：一致则开新局，不一致则通知双方重选
-  resolveRematch() {
-    const values = [...this.rematchVotes.values()];
-    if (values.length >= 2 && values[0] === values[1]) {
-      this.restartGame(values[0]);
-    } else {
-      this.broadcast({ type: 'rematchMismatch' });
-      this.rematchVotes.clear();
-    }
-  }
-
-  bothVoted() {
-    let count = 0;
-    for (const id of this.connections.keys()) {
-      if (this.rematchVotes.has(id)) count++;
-    }
-    return count >= 2;
   }
 
   normalizeGameType(gt) {

@@ -1786,15 +1786,6 @@ function connect() {
         setStatus('对方拒绝了再来一局');
         break;
 
-      case 'rematchMismatch':
-        // 双方几乎同时点 request 且选了不同棋种：双方都回到结果弹窗重新发起
-        document.getElementById('rematchWaiting').classList.add('hidden');
-        document.getElementById('rematchModal').classList.add('hidden');
-        rematchRole = null;
-        document.getElementById('resultOverlay').classList.remove('hidden');
-        document.getElementById('rematchHint').textContent = '双方选择不一致，请重新发起';
-        break;
-
       case 'rematchStart':
         // 服务端确认重赛已开始：立即隐藏重赛相关弹窗（rematchWaiting/rematchModal/resultOverlay），
         // 不依赖随后 colorAssign 触发 hideAllModals 的副作用。
@@ -1854,7 +1845,7 @@ function acceptRematch() {
     ws.send(JSON.stringify({ type: 'rematchAccept' }));
     document.getElementById('rematchModal').classList.add('hidden');
     document.getElementById('resultOverlay').classList.add('hidden');
-    // 被请求方同意后等待服务端重启游戏（或发送 rematchMismatch）
+    // 被请求方同意后等待服务端重启游戏（rematchStart）
   }
 }
 
