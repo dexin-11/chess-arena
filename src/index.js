@@ -1737,7 +1737,7 @@ function connect() {
         rematchRole = 'accepter';
         document.getElementById('rematchWaiting').classList.add('hidden');
         const gameName = msg.gameType === 'chess' ? '国际象棋' : (msg.gameType === 'xiangqi' ? '中国象棋' : '五子棋');
-        document.getElementById('rematchModalText').textContent = '对方申请在下一盘' + gameName;
+        document.getElementById('rematchModalText').textContent = '对方申请再下一盘' + gameName;
         document.getElementById('rematchModal').classList.remove('hidden');
         break;
 
@@ -1809,6 +1809,7 @@ function acceptRematch() {
     // 被请求方无需选择棋种，服务端会采用请求方已选的棋种
     ws.send(JSON.stringify({ type: 'rematchAccept' }));
     document.getElementById('rematchModal').classList.add('hidden');
+    document.getElementById('resultOverlay').classList.add('hidden');
     // 被请求方同意后等待服务端重启游戏（或发送 rematchMismatch）
   }
 }
