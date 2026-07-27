@@ -126,11 +126,14 @@ body {
 
 .cell.disabled { cursor: default; }
 .cell.disabled .preview { display: none; }
-/* 走棋上一步标记：彩色圆点（替代原红色矩形/红圈）
-   from=黄(起点) to=绿(落点)；圆点置于格子右上角，z-index 高于棋子以始终可见。*/
-.cell .last-move-dot, .chess-cell .last-move-dot, .xiangqi-cell .last-move-dot { position: absolute; top: 5%; right: 5%; width: 22%; height: 22%; border-radius: 50%; pointer-events: none; z-index: 5; box-shadow: 0 0 0 1.5px rgba(255,255,255,0.75), 0 1px 3px rgba(0,0,0,0.45); }
-.last-move-dot.from { background: #f0a500; }
-.last-move-dot.to { background: #4ecca3; }
+/* 走棋上一步标记：落点(to)棋子边缘绿色环，起点(from)交叉点中心黄色小圆点。
+   五子棋只有落点（落子型游戏无起点概念）。*/
+.cell.last-move-to .stone { box-shadow: 0 0 0 min(0.4vmin,4px) #4ecca3, 1px 2px 4px rgba(0,0,0,0.6), inset 0 -2px 4px rgba(0,0,0,0.5); }
+.cell.last-move-to .stone.white { box-shadow: 0 0 0 min(0.4vmin,4px) #4ecca3, 1px 2px 4px rgba(0,0,0,0.4), inset 0 -2px 4px rgba(0,0,0,0.2); }
+.chess-cell.last-move-to { box-shadow: inset 0 0 0 min(0.4vmin,4px) #4ecca3; }
+.xiangqi-cell.last-move-to .xpiece { box-shadow: 0 0 0 min(0.4vmin,4px) #4ecca3, 0 2px 5px rgba(60,30,10,0.45), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); }
+/* 起点交叉点中心黄点（from 无棋子，中心点可见） */
+.last-move-mark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 24%; height: 24%; border-radius: 50%; background: #f0a500; pointer-events: none; z-index: 1; box-shadow: 0 0 0 1px rgba(255,255,255,0.6); }
 .cell .coord { position: absolute; font-size: min(1.6vmin, 10px); font-family: 'JetBrains Mono', monospace; font-weight: 700; pointer-events: none; color: rgba(60,30,10,0.55); z-index: 1; }
 .cell .coord.file { bottom: 1px; right: 3px; }
 .cell .coord.rank { top: 1px; left: 3px; }
@@ -976,17 +979,25 @@ function getCell(r, c) {
   return document.querySelector('[data-row="' + r + '"][data-col="' + c + '"]');
 }
 
-// === 走棋上一步标记（彩色圆点） ===
-function addLastMoveDot(r, c, type) {
+// === 走棋上一步标记 ===
+// to: 落点棋子边缘绿色环（CSS class 驱动）
+// from: 起点交叉点中心黄色圆点（独立元素，因 from 格无棋子）
+function setLastMoveMark(r, c, type) {
   const cell = getCell(r, c);
   if (!cell) return;
-  const dot = document.createElement('span');
-  dot.className = 'last-move-dot ' + type;
-  cell.appendChild(dot);
+  cell.classList.add('last-move-' + type);
+  if (type === 'from') {
+    const mark = document.createElement('span');
+    mark.className = 'last-move-mark';
+    cell.appendChild(mark);
+  }
 }
 
-function clearLastMoveDots() {
-  document.querySelectorAll('.last-move-dot').forEach((el) => el.remove());
+function clearLastMoveMarks() {
+  document.querySelectorAll('.last-move-from, .last-move-to').forEach((el) => {
+    el.classList.remove('last-move-from', 'last-move-to');
+  });
+  document.querySelectorAll('.last-move-mark').forEach((el) => el.remove());
 }
 
 // === 中国象棋十字花角标（兵卒位与炮位） ===
@@ -1051,10 +1062,10 @@ function renderChessMove(from, to, special) {
     setChessCellPiece(row, 3, chessBoardData[row][3]);
   }
 
-  // lastMove 彩色圆点（from=黄 to=绿）
-  clearLastMoveDots();
-  addLastMoveDot(from.r, from.c, 'from');
-  addLastMoveDot(to.r, to.c, 'to');
+  // lastMove 标记：from=起点中心黄点，to=落点棋子边缘绿环
+  clearLastMoveMarks();
+  setLastMoveMark(from.r, from.c, 'from');
+  setLastMoveMark(to.r, to.c, 'to');
 
   // 将军高亮
   document.querySelectorAll('.chess-cell.check-king').forEach((el) => el.classList.remove('check-king'));
@@ -1093,10 +1104,10 @@ function renderXiangqiMove(from, to) {
   setXiangqiCellPiece(from.r, from.c, null);
   setXiangqiCellPiece(to.r, to.c, xiangqiBoardData[to.r][to.c]);
 
-  // lastMove 彩色圆点（from=黄 to=绿）
-  clearLastMoveDots();
-  addLastMoveDot(from.r, from.c, 'from');
-  addLastMoveDot(to.r, to.c, 'to');
+  // lastMove 标记：from=起点中心黄点，to=落点棋子边缘绿环
+  clearLastMoveMarks();
+  setLastMoveMark(from.r, from.c, 'from');
+  setLastMoveMark(to.r, to.c, 'to');
 
   document.querySelectorAll('.xiangqi-cell.check-king').forEach((el) => el.classList.remove('check-king'));
   if (checkColor) {
@@ -1114,8 +1125,8 @@ function renderXiangqiMove(from, to) {
 }
 
 function renderGomokuMove(row, col, color) {
-  // 清除上一帧 last-move 圆点
-  clearLastMoveDots();
+  // 清除上一帧 last-move 标记
+  clearLastMoveMarks();
   const cell = getCell(row, col);
   if (!cell) return;
   if (boardData[row][col]) {
@@ -1128,10 +1139,8 @@ function renderGomokuMove(row, col, color) {
     }
     cell.classList.add('disabled');
   }
-  // 添加 last-move 圆点（绿点表示落子位置）
-  const dot = document.createElement('span');
-  dot.className = 'last-move-dot to';
-  cell.appendChild(dot);
+  // 落点棋子边缘绿环（CSS class 驱动）
+  cell.classList.add('last-move-to');
   // 移除 hover 预览
   const preview = cell.querySelector('.preview');
   if (preview) preview.remove();
@@ -1142,13 +1151,12 @@ function renderGomoku() {
     for (let c = 0; c < COLS; c++) {
       const cell = getCell(r, c);
       if (!cell) continue;
-      // last-move 圆点（绿点表示落子位置）
-      const existingDot = cell.querySelector('.last-move-dot');
-      if (existingDot) existingDot.remove();
+      // last-move 标记：落点棋子边缘绿环（CSS class 驱动，全量渲染时增删 class）
+      const hadMark = cell.classList.contains('last-move-to');
       if (lastMove && lastMove.row === r && lastMove.col === c) {
-        const dot = document.createElement('span');
-        dot.className = 'last-move-dot to';
-        cell.appendChild(dot);
+        if (!hadMark) cell.classList.add('last-move-to');
+      } else {
+        if (hadMark) cell.classList.remove('last-move-to');
       }
       const existing = cell.querySelector('.stone');
       if (boardData[r][c]) {
@@ -1218,14 +1226,13 @@ function renderChess() {
         cell.classList.add('selected');
       }
       if (lastMove && lastMove.from.r === r && lastMove.from.c === c) {
-        const dot = document.createElement('span');
-        dot.className = 'last-move-dot from';
-        cell.appendChild(dot);
+        cell.classList.add('last-move-from');
+        const mark = document.createElement('span');
+        mark.className = 'last-move-mark';
+        cell.appendChild(mark);
       }
       if (lastMove && lastMove.to.r === r && lastMove.to.c === c) {
-        const dot = document.createElement('span');
-        dot.className = 'last-move-dot to';
-        cell.appendChild(dot);
+        cell.classList.add('last-move-to');
       }
       if (checkColor && piece && piece.type === 'k' && piece.color === checkColor) {
         cell.classList.add('check-king');
@@ -1372,14 +1379,13 @@ function renderXiangqi() {
         cell.classList.add('selected');
       }
       if (lastMove && lastMove.from.r === r && lastMove.from.c === c) {
-        const dot = document.createElement('span');
-        dot.className = 'last-move-dot from';
-        cell.appendChild(dot);
+        cell.classList.add('last-move-from');
+        const mark = document.createElement('span');
+        mark.className = 'last-move-mark';
+        cell.appendChild(mark);
       }
       if (lastMove && lastMove.to.r === r && lastMove.to.c === c) {
-        const dot = document.createElement('span');
-        dot.className = 'last-move-dot to';
-        cell.appendChild(dot);
+        cell.classList.add('last-move-to');
       }
       if (checkColor && piece && piece.type === 'k' && piece.color === checkColor) {
         cell.classList.add('check-king');
