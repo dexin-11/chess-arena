@@ -289,6 +289,7 @@ export class Room {
     if (this.board[row][col] !== null) return;
 
     this.board[row][col] = conn.color;
+    this.lastMove = { row, col };
 
     if (this.checkWin(row, col, conn.color)) {
       this.gameOver = true;
@@ -608,6 +609,8 @@ export class Room {
     } else if (this.gameType === 'xiangqi') {
       payload.lastMove = this.lastMove;
       payload.xiangqiState = this.xiangqiState;
+    } else {
+      payload.lastMove = this.lastMove;
     }
     this.broadcast(payload);
   }
