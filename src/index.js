@@ -164,6 +164,8 @@ body {
 /* 九宫格斜线（SVG 叠加层，stroke-width 用 viewBox 单位的细值，避免被放大成粗矩形） */
 .xiangqi-palace-diag { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; overflow: visible; }
 .xiangqi-palace-diag line { stroke: rgba(60,30,10,0.7); stroke-width: 0.04; stroke-linecap: round; }
+/* 兵/炮位「十字花」角标，比九宫斜线略细 */
+.xiangqi-palace-diag line.star-mark { stroke: rgba(60,30,10,0.75); stroke-width: 0.035; }
 /* 棋子：木质浮雕硬币风格 */
 .xiangqi-cell .xpiece { position: relative; z-index: 3; width: 86%; height: 86%; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: calc(var(--board-size) * 0.062); font-family: 'Ma Shan Zheng', 'ZCOOL XiaoWei', 'STKaiti', 'KaiTi', 'Noto Serif SC', serif; font-weight: 700; line-height: 1; background: radial-gradient(circle at 32% 26%, #fff8e3 0%, #f4dba2 55%, #d4a76a 100%); box-shadow: 0 2px 5px rgba(60,30,10,0.45), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); transition: transform 0.15s ease; will-change: transform; }
 .xiangqi-cell .xpiece::before { content: ''; position: absolute; inset: 7%; border-radius: 50%; border: 1.5px solid currentColor; opacity: 0.45; pointer-events: none; }
@@ -1205,6 +1207,43 @@ function buildXiangqiDOM(boardEl) {
     line.setAttribute('y2', y2 + 0.5);
     svg.appendChild(line);
   }
+
+  // 兵/卒位与炮位「十字花」角标（共 14 个标记点）
+  // 红兵 row 6 col 0/2/4/6/8；黑卒 row 3 col 0/2/4/6/8
+  // 红炮 row 7 col 1/7；黑炮 row 2 col 1/7
+  // 边界列 (col 0/8) 只画内侧两角，其余四角全画
+  const markPoints = [];
+  for (const r of [3, 6]) for (const c of [0, 2, 4, 6, 8]) markPoints.push({ r, c });
+  for (const r of [2, 7]) for (const c of [1, 7]) markPoints.push({ r, c });
+  const G = 0.12;  // 角标内边距（viewBox 单位）
+  const L = 0.22;  // 角标线长
+  for (const { r, c } of markPoints) {
+    // 逻辑坐标 → viewBox 坐标（考虑翻转）
+    const vx = xiangqiFlipped ? 8 - c : c;
+    const vy = xiangqiFlipped ? 9 - r : r;
+    const cx = vx + 0.5, cy = vy + 0.5;
+    const visualC = xiangqiFlipped ? 8 - c : c;
+    // 四个角：左上 (cx-G-L, cy-G)、右上 (cx+G+L, cy-G)、左下 (cx-G-L, cy+G)、右下 (cx+G+L, cy+G)
+    // 每个角两条短线：一条水平、一条垂直，组成 ⌐ 型
+    const corners = [];
+    if (visualC !== 0) corners.push({ sx: cx - G - L, sy: cy - G, ex: cx - G, ey: cy - G, sx2: cx - G, sy2: cy - G - L, ex2: cx - G, ey2: cy - G }); // 左上
+    if (visualC !== 8) corners.push({ sx: cx + G, sy: cy - G, ex: cx + G + L, ey: cy - G, sx2: cx + G, sy2: cy - G - L, ex2: cx + G, ey2: cy - G }); // 右上
+    if (visualC !== 0) corners.push({ sx: cx - G - L, sy: cy + G, ex: cx - G, ey: cy + G, sx2: cx - G, sy2: cy + G, ex2: cx - G, ey2: cy + G + L }); // 左下
+    if (visualC !== 8) corners.push({ sx: cx + G, sy: cy + G, ex: cx + G + L, ey: cy + G, sx2: cx + G, sy2: cy + G, ex2: cx + G, ey2: cy + G + L }); // 右下
+    for (const corner of corners) {
+      const hLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      hLine.setAttribute('x1', corner.sx); hLine.setAttribute('y1', corner.sy);
+      hLine.setAttribute('x2', corner.ex); hLine.setAttribute('y2', corner.ey);
+      hLine.setAttribute('class', 'star-mark');
+      svg.appendChild(hLine);
+      const vLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      vLine.setAttribute('x1', corner.sx2); vLine.setAttribute('y1', corner.sy2);
+      vLine.setAttribute('x2', corner.ex2); vLine.setAttribute('y2', corner.ey2);
+      vLine.setAttribute('class', 'star-mark');
+      svg.appendChild(vLine);
+    }
+  }
+
   grid.appendChild(svg);
 
   // 事件委托：单个 listener 处理所有 cell 点击，避免 90 个闭包
