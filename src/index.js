@@ -155,6 +155,9 @@ body {
 .xiangqi-cell.edge-bottom::before { bottom: 50%; top: 0; } /* 底行：水平线只在上半部分 */
 .xiangqi-cell.edge-left::after { left: 50%; } /* 左列：竖线只在右半部分 */
 .xiangqi-cell.edge-right::after { right: 50%; left: 0; } /* 右列：竖线只在左半部分 */
+/* 楚河汉界：第5、6横线之间竖线断开（标准象棋棋盘河界处9条纵线中断） */
+.xiangqi-cell.river-top::after { bottom: 50%; } /* 楚河汉界上边行（visualR=4）：竖线只在上半部分 */
+.xiangqi-cell.river-bottom::after { top: 50%; } /* 楚河汉界下边行（visualR=5）：竖线只在下半部分 */
 /* 楚河汉界 */
 .xiangqi-river { position: absolute; left: 0; right: 0; top: 45%; height: 10%; display: flex; align-items: center; justify-content: space-around; font-size: calc(var(--board-size) * 0.06); color: rgba(60,30,10,0.5); font-family: 'Ma Shan Zheng', 'STKaiti', 'KaiTi', serif; font-weight: 700; letter-spacing: 0.3em; pointer-events: none; z-index: 1; }
 .xiangqi-river span { display: inline-block; }
@@ -167,7 +170,7 @@ body {
 .xiangqi-cell .xpiece.red { color: #b91c1c; border: 2px solid #7f1d1d; text-shadow: 0 1px 0 rgba(255,250,235,0.5); }
 .xiangqi-cell .xpiece.black { color: #1f1f1f; border: 2px solid #0a0a0a; text-shadow: 0 1px 0 rgba(255,250,235,0.4); }
 .xiangqi-cell.selected .xpiece { transform: translateY(-1px) scale(1.06); box-shadow: 0 0 0 min(0.5vmin,5px) var(--accent), 0 3px 7px rgba(60,30,10,0.5), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); }
-.xiangqi-cell.last-move::before { background: rgba(233,69,96,0.45); }
+.xiangqi-cell.last-move .xpiece { box-shadow: 0 0 0 min(0.5vmin,5px) rgba(255, 213, 79, 0.85), 0 3px 7px rgba(60,30,10,0.5), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); }
 .xiangqi-cell.check-king .xpiece { box-shadow: 0 0 0 min(0.5vmin,5px) #ff3333, 0 3px 7px rgba(60,30,10,0.5), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); }
 .xiangqi-cell .move-dot { position: absolute; width: 26%; height: 26%; border-radius: 50%; background: rgba(60,30,10,0.3); pointer-events: none; z-index: 2; }
 .xiangqi-cell .capture-ring { position: absolute; inset: 7%; border: min(0.5vmin,5px) solid rgba(233,69,96,0.6); border-radius: 50%; box-sizing: border-box; pointer-events: none; z-index: 2; }
@@ -1246,6 +1249,9 @@ function renderXiangqi() {
       if (visualR === 9) cell.classList.add('edge-bottom');
       if (visualC === 0) cell.classList.add('edge-left');
       if (visualC === 8) cell.classList.add('edge-right');
+      // 楚河汉界：第5横线（visualR=4）与第6横线（visualR=5）之间竖线断开
+      if (visualR === 4) cell.classList.add('river-top');
+      if (visualR === 5) cell.classList.add('river-bottom');
 
       const piece = (xiangqiBoardData && xiangqiBoardData[r]) ? xiangqiBoardData[r][c] : null;
       if (piece && XIANGQI_GLYPHS[piece.color] && XIANGQI_GLYPHS[piece.color][piece.type]) {
