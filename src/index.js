@@ -10,7 +10,7 @@ const HOMEPAGE_HTML = `<!DOCTYPE html>
 <title>棋类对战</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Ma+Shan+Zheng&family=ZCOOL+XiaoWei&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Ma+Shan+Zheng&family=ZCOOL+XiaoWei&family=Noto+Sans+Symbols&display=swap" rel="stylesheet">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'Sora', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: radial-gradient(ellipse 80% 60% at 50% -20%, rgba(233,69,96,0.12), transparent 60%), radial-gradient(ellipse 60% 80% at 100% 100%, rgba(15,52,96,0.4), transparent 70%), #0a0d1a; color: #eee; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
@@ -60,7 +60,7 @@ const GAME_HTML = `<!DOCTYPE html>
 <title>棋类对战</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Ma+Shan+Zheng&family=ZCOOL+XiaoWei&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Ma+Shan+Zheng&family=ZCOOL+XiaoWei&family=Noto+Sans+Symbols&display=swap" rel="stylesheet">
 <style>
 :root {
   --bg-0: #0a0d1a; --bg-1: #131829; --bg-2: #1c2238;
@@ -128,7 +128,7 @@ body {
 .chess-cell { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: calc(var(--board-size) * 0.108); cursor: pointer; position: relative; user-select: none; line-height: 1; }
 .chess-cell.light { background: #f0d9b5; }
 .chess-cell.dark { background: #b58863; }
-.chess-cell .piece { line-height: 1; pointer-events: none; font-family: 'Noto Sans Symbols 2', 'Segoe UI Symbol', 'Apple Symbols', 'Noto Sans Symbols', 'DejaVu Sans', sans-serif; transition: transform 0.15s ease; will-change: transform; }
+.chess-cell .piece { line-height: 1; pointer-events: none; font-family: 'Noto Sans Symbols', 'Noto Sans Symbols 2', 'Segoe UI Symbol', 'Apple Symbols', 'DejaVu Sans', sans-serif; transition: transform 0.15s ease; will-change: transform; }
 .chess-cell .piece.white { color: #f8f6f0; text-shadow: -1px 0 0 #2a2a2a, 1px 0 0 #2a2a2a, 0 -1px 0 #2a2a2a, 0 1px 0 #2a2a2a, -1px -1px 0 #2a2a2a, 1px -1px 0 #2a2a2a, -1px 1px 0 #2a2a2a, 1px 1px 0 #2a2a2a, 0 2px 3px rgba(0,0,0,0.45); }
 .chess-cell .piece.black { color: #1a1a1a; text-shadow: 0 0 1px rgba(255,255,255,0.22), 0 2px 3px rgba(0,0,0,0.5); }
 .chess-cell.selected .piece { transform: translateY(-1px) scale(1.04); }
@@ -921,7 +921,8 @@ function renderBoard() {
 }
 
 function getCell(r, c) {
-  return document.querySelector('.cell[data-row="' + r + '"][data-col="' + c + '"]');
+  // 通用属性选择器：五子棋(.cell)/国际象棋(.chess-cell)/中国象棋(.xiangqi-cell)均设置 data-row/data-col
+  return document.querySelector('[data-row="' + r + '"][data-col="' + c + '"]');
 }
 
 // === 增量渲染：只更新走棋影响的格子，避免整张棋盘 DOM 重建 ===
@@ -942,6 +943,9 @@ function setChessCellPiece(r, c, piece) {
 
 // 走棋后局部更新：from 清空、to 放置棋子、易位/过路兵额外格、高亮 lastMove/check
 function renderChessMove(from, to, special) {
+  // 清理上一帧的合法走法提示（move-dot/capture-ring），走棋后 chessLegalMoves 已清空
+  document.querySelectorAll('.chess-cell .move-dot, .chess-cell .capture-ring').forEach((el) => el.remove());
+
   setChessCellPiece(from.r, from.c, null);
   setChessCellPiece(to.r, to.c, chessBoardData[to.r][to.c]);
 
@@ -996,6 +1000,9 @@ function setXiangqiCellPiece(r, c, piece) {
 }
 
 function renderXiangqiMove(from, to) {
+  // 清理上一帧的合法走法提示（move-dot/capture-ring），走棋后 xiangqiLegalMoves 已清空
+  document.querySelectorAll('.xiangqi-cell .move-dot, .xiangqi-cell .capture-ring').forEach((el) => el.remove());
+
   setXiangqiCellPiece(from.r, from.c, null);
   setXiangqiCellPiece(to.r, to.c, xiangqiBoardData[to.r][to.c]);
 
