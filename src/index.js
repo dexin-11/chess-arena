@@ -610,7 +610,7 @@ const Chess = (function() {
     return legal;
   }
 
-  return { getLegalMoves };
+  return { getLegalMoves, applyMove };
 })();
 
 // === 中国象棋规则引擎（前端本地版，与 src/xiangqi.js 同源） ===
@@ -871,7 +871,7 @@ const Xiangqi = (function() {
     return legal;
   }
 
-  return { getLegalMoves };
+  return { getLegalMoves, applyMove };
 })();
 
 const ROWS = 15, COLS = 15;
@@ -911,6 +911,11 @@ let checkColor = null;
 let rematchRole = null; // 'requester' | 'accepter' | null
 let pendingPromotionMove = null;
 var waitAckReceived = false;
+// 端到端加密状态（ECDH P-256 + AES-GCM）
+let myKeyPair = null;
+let sharedSecretKey = null;
+let peerKeyBase64 = null;
+let pendingChatQueue = [];
 
 function generateRoomId() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -1495,6 +1500,7 @@ function connect() {
 
   ws.onopen = () => {
     setStatus('已连接，等待对手...');
+    initEncryption();
     pingTimer = setInterval(() => {
       if (ws && ws.readyState === 1) {
         ws.send(JSON.stringify({ type: 'ping', ts: Date.now() }));
@@ -1579,6 +1585,50 @@ function connect() {
         }
         break;
 
+      case 'moveUpdate': {
+        // 增量走子同步：用本地引擎应用走法，避免整盘下发
+        if (msg.gameType && msg.gameType !== gameType) {
+          gameType = msg.gameType;
+          buildBoard();
+        }
+        if (gameType === 'gomoku') {
+          if (msg.move) boardData[msg.move.row][msg.move.col] = msg.color;
+        } else if (gameType === 'chess') {
+          try {
+            const result = Chess.applyMove(chessBoardData, msg.move, chessState, msg.move && msg.move.promotionPiece);
+            chessBoardData = result.board;
+            chessState = result.newState;
+          } catch (e) {
+            // 本地应用失败（引擎同源，理论上不会发生）；以服务端状态为准
+          }
+          if (msg.chessState) chessState = msg.chessState;
+        } else if (gameType === 'xiangqi') {
+          try {
+            const result = Xiangqi.applyMove(xiangqiBoardData, msg.move, xiangqiState);
+            xiangqiBoardData = result.board;
+            xiangqiState = result.newState;
+          } catch (e) {
+            // 本地应用失败，以服务端状态为准
+          }
+          if (msg.xiangqiState) xiangqiState = msg.xiangqiState;
+        }
+        lastMove = msg.lastMove || null;
+        currentTurn = msg.currentTurn;
+        gameOver = msg.gameOver;
+        draw = !!msg.draw;
+        checkColor = msg.checkColor || null;
+        chessSelected = null;
+        chessLegalMoves = [];
+        xiangqiSelected = null;
+        xiangqiLegalMoves = [];
+        renderBoard();
+        updateHeader();
+        if (!gameOver && myColor) {
+          setStatus(myColor === currentTurn ? '轮到你了！' : '等待对手落子...');
+        }
+        break;
+      }
+
       case 'gameOver':
         gameOver = true;
         draw = !!msg.draw;
@@ -1656,8 +1706,22 @@ function connect() {
         waitAckReceived = true;
         break;
 
-      case 'chat':
-        appendChatMessage(msg.color, msg.text, msg.ts);
+      case 'chat': {
+        // E2E 加密消息：解密后显示；不支持加密或解密失败时回退明文
+        (async () => {
+          if (msg.ct && msg.iv && window.crypto && crypto.subtle) {
+            const plain = await decryptChat(msg.iv, msg.ct);
+            if (plain !== null) appendChatMessage(msg.color, plain, msg.ts);
+            else appendSystemMessage('收到无法解密的消息');
+          } else if (typeof msg.text === 'string') {
+            appendChatMessage(msg.color, msg.text, msg.ts);
+          }
+        })();
+        break;
+      }
+
+      case 'pubKey':
+        onPeerPubKey(msg.key);
         break;
     }
   };
@@ -1781,6 +1845,117 @@ function copyLink() {
   }
 }
 
+// === 端到端加密（ECDH P-256 派生共享密钥 + AES-GCM 加密） ===
+// 服务端只转发公钥与密文，无法解密聊天内容。重连时重新协商密钥。
+function arrayBufferToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+function base64ToArrayBuffer(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
+
+async function initEncryption() {
+  // 重连时重置：旧共享密钥已失效，需用新公钥重新协商
+  sharedSecretKey = null;
+  peerKeyBase64 = null;
+  if (!window.crypto || !crypto.subtle) return;
+  try {
+    myKeyPair = await crypto.subtle.generateKey(
+      { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey']
+    );
+    const pubKeyBytes = await crypto.subtle.exportKey('raw', myKeyPair.publicKey);
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: 'pubKey', key: arrayBufferToBase64(pubKeyBytes) }));
+    }
+  } catch (e) {
+    myKeyPair = null;
+  }
+}
+
+async function onPeerPubKey(newKeyBase64) {
+  if (!window.crypto || !crypto.subtle || !myKeyPair) return;
+  // 仅在公钥变化时重新派生（断开重连或首次交换），同时避免双方互相重发形成死循环
+  if (peerKeyBase64 === newKeyBase64) return;
+  peerKeyBase64 = newKeyBase64;
+  try {
+    const peerPublicKey = await crypto.subtle.importKey(
+      'raw', base64ToArrayBuffer(newKeyBase64),
+      { name: 'ECDH', namedCurve: 'P-256' }, false, []
+    );
+    sharedSecretKey = await crypto.subtle.deriveKey(
+      { name: 'ECDH', public: peerPublicKey }, myKeyPair.privateKey,
+      { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
+    );
+    // 通道建立后重发我方公钥：对方可能刚重连/刚加入，尚未收到我方公钥
+    const pubKeyBytes = await crypto.subtle.exportKey('raw', myKeyPair.publicKey);
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: 'pubKey', key: arrayBufferToBase64(pubKeyBytes) }));
+    }
+    appendSystemMessage('加密通道已建立');
+    // 发送通道建立前排队等待的消息
+    while (pendingChatQueue.length && sharedSecretKey) {
+      const text = pendingChatQueue.shift();
+      await sendChatEncrypted(text, true);
+    }
+  } catch (e) {
+    sharedSecretKey = null;
+  }
+}
+
+async function sendChatEncrypted(text, skipLocalDisplay) {
+  // 发送方本地立即显示，无需等服务端回环，降低感知延迟
+  if (!skipLocalDisplay) appendChatMessage(myColor, text, Date.now());
+  if (!ws || ws.readyState !== 1) return;
+  if (!window.crypto || !crypto.subtle) {
+    // 不支持 Web Crypto（非安全上下文）时回退明文
+    ws.send(JSON.stringify({ type: 'chat', text: text.slice(0, 500) }));
+    return;
+  }
+  if (!sharedSecretKey) {
+    // 加密通道尚未建立，排队等待建立后自动发送
+    if (pendingChatQueue.length < 50) pendingChatQueue.push(text);
+    return;
+  }
+  try {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const encoded = new TextEncoder().encode(text);
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv }, sharedSecretKey, encoded
+    );
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({
+        type: 'chat',
+        iv: arrayBufferToBase64(iv.buffer),
+        ct: arrayBufferToBase64(ciphertext),
+      }));
+    }
+  } catch (e) {
+    // 加密失败时回退明文，保证消息可达
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: 'chat', text: text.slice(0, 500) }));
+    }
+  }
+}
+
+async function decryptChat(ivBase64, ctBase64) {
+  if (!sharedSecretKey) return null;
+  try {
+    const plain = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: base64ToArrayBuffer(ivBase64) },
+      sharedSecretKey, base64ToArrayBuffer(ctBase64)
+    );
+    return new TextDecoder().decode(plain);
+  } catch (e) {
+    return null;
+  }
+}
+
 // === 聊天室 ===
 function setupChat() {
   const form = document.getElementById('chatForm');
@@ -1789,10 +1964,9 @@ function setupChat() {
     e.preventDefault();
     const text = (input.value || '').trim();
     if (!text) return;
-    if (!ws || ws.readyState !== 1) return;
-    ws.send(JSON.stringify({ type: 'chat', text: text.slice(0, 500) }));
     input.value = '';
     input.focus();
+    sendChatEncrypted(text.slice(0, 500));
   });
 }
 

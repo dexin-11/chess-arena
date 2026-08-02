@@ -110,7 +110,7 @@ export class Room {
           gameType: this.gameType,
         });
         this.broadcastSync();
-        this.broadcastStatus();
+        this.broadcastStatus(true);
 
         // 通知对方重连
         for (const [id, c] of this.connections) {
@@ -164,7 +164,7 @@ export class Room {
     }
 
     this.broadcastSync();
-    this.broadcastStatus();
+    this.broadcastStatus(true);
   }
 
   handleMessage(wsId, raw) {
@@ -224,15 +224,31 @@ export class Room {
         break;
 
       case 'chat': {
-        // 聊天消息：广播给房间内所有人（含发送者，由客户端本地去重/渲染）
-        const text = typeof msg.text === 'string' ? msg.text.slice(0, 500).trim() : '';
-        if (!text) return;
-        this.broadcast({
-          type: 'chat',
-          color: conn.color,
-          text,
-          ts: Date.now(),
-        });
+        // E2E 加密聊天：仅转发密文给对手，不读取内容（发送方本地直接显示，无需回环）
+        const payload = { type: 'chat', color: conn.color, ts: Date.now() };
+        if (typeof msg.iv === 'string' && typeof msg.ct === 'string') {
+          payload.iv = msg.iv.slice(0, 100);
+          payload.ct = msg.ct.slice(0, 3000);
+        } else if (typeof msg.text === 'string') {
+          payload.text = msg.text.slice(0, 500).trim();
+          if (!payload.text) return;
+        } else {
+          return;
+        }
+        for (const [id, c] of this.connections) {
+          if (id !== wsId) this.sendMessage(c.ws, payload);
+        }
+        break;
+      }
+
+      case 'pubKey': {
+        // E2E 密钥交换：将公钥转发给对方（服务端不存储，不接触会话密钥）
+        if (typeof msg.key !== 'string') return;
+        for (const [id, c] of this.connections) {
+          if (id !== wsId) {
+            this.sendMessage(c.ws, { type: 'pubKey', key: msg.key });
+          }
+        }
         break;
       }
     }
@@ -249,6 +265,7 @@ export class Room {
     if (this.board[row][col] !== null) return;
 
     this.board[row][col] = conn.color;
+    const move = { row, col };
 
     if (this.checkWin(row, col, conn.color)) {
       this.gameOver = true;
@@ -258,7 +275,7 @@ export class Room {
       this.broadcastSync();
     } else {
       this.currentTurn = this.currentTurn === 'black' ? 'white' : 'black';
-      this.broadcastSync();
+      this.broadcastMoveUpdate(move, conn.color, null, null);
     }
   }
 
@@ -322,11 +339,9 @@ export class Room {
       this.broadcast({ type: 'gameOver', winner: null, draw: true });
       this.broadcastSync();
     } else {
-      this.broadcastSync();
-      // 非将杀的将军：sync 之后发送 check 通知，客户端据此高亮被将军的王
-      if (Chess.isInCheck(this.chessBoard, opponentColor)) {
-        this.broadcast({ type: 'check', color: opponentColor });
-      }
+      // 增量同步：仅下发走子与状态，客户端本地应用（payload 远小于整盘 sync）
+      const checkColor = Chess.isInCheck(this.chessBoard, opponentColor) ? opponentColor : null;
+      this.broadcastMoveUpdate(matched, conn.color, promotionPiece, checkColor);
     }
   }
 
@@ -382,11 +397,8 @@ export class Room {
       this.broadcast({ type: 'gameOver', winner: conn.color, draw: false });
       this.broadcastSync();
     } else {
-      this.broadcastSync();
-      // 非将杀的将军：sync 之后发送 check 通知，客户端据此高亮被将军的将/帅
-      if (Xiangqi.isInCheck(this.xiangqiBoard, opponentColor)) {
-        this.broadcast({ type: 'check', color: opponentColor });
-      }
+      const checkColor = Xiangqi.isInCheck(this.xiangqiBoard, opponentColor) ? opponentColor : null;
+      this.broadcastMoveUpdate(matched, conn.color, null, checkColor);
     }
   }
 
@@ -439,7 +451,7 @@ export class Room {
       this.sendMessage(c.ws, { type: 'opponentLeft' });
     }
 
-    this.broadcastStatus();
+    this.broadcastStatus(true);
   }
 
   handleRematchRequest(wsId, msg) {
@@ -563,7 +575,34 @@ export class Room {
     this.broadcast(payload);
   }
 
-  broadcastStatus() {
+  // 增量走子同步：仅下发走法与必要状态，客户端用本地引擎应用。
+  // 相比 broadcastSync（整盘 ~2KB）显著减小每步 payload，降低走子延迟。
+  // 终局仍用 broadcastSync 保证最终棋盘一致性。
+  broadcastMoveUpdate(move, color, promotionPiece, checkColor) {
+    const payload = {
+      type: 'moveUpdate',
+      gameType: this.gameType,
+      color,
+      currentTurn: this.currentTurn,
+      gameOver: this.gameOver,
+      winner: this.winner,
+      draw: this.draw,
+      lastMove: this.lastMove,
+      checkColor: checkColor || null,
+    };
+    if (this.gameType === 'gomoku') {
+      payload.move = { row: move.row, col: move.col };
+    } else {
+      payload.move = { from: move.from, to: move.to };
+      if (move.special) payload.move.special = move.special;
+      if (promotionPiece) payload.move.promotionPiece = promotionPiece;
+    }
+    if (this.gameType === 'chess') payload.chessState = this.chessState;
+    else if (this.gameType === 'xiangqi') payload.xiangqiState = this.xiangqiState;
+    this.broadcast(payload);
+  }
+
+  broadcastStatus(force) {
     const status = {};
     for (const [, conn] of this.connections) {
       if (conn.color) {
@@ -573,7 +612,29 @@ export class Room {
         };
       }
     }
+    // 节流：延迟数值频繁微调但档位未变时跳过，仅在上下线/延迟档位变化或超过 8s 时广播。
+    // 原 3s/人的延迟上报会产生大量无意义 status 广播，节流后下行消息频率下降约 60%。
+    if (!force) {
+      const now = Date.now();
+      const recent = this.lastStatusTs && (now - this.lastStatusTs) < 8000;
+      if (recent && !this.statusMeaningfullyChanged(this.lastStatus, status)) return;
+    }
+    this.lastStatus = status;
+    this.lastStatusTs = Date.now();
     this.broadcast({ type: 'status', players: status });
+  }
+
+  statusMeaningfullyChanged(prev, cur) {
+    if (!prev) return true;
+    const colors = new Set([...Object.keys(prev), ...Object.keys(cur)]);
+    const cat = (lat) => (lat < 100 ? 0 : lat < 300 ? 1 : 2);
+    for (const color of colors) {
+      const p = prev[color], c = cur[color];
+      if (!p || !c) return true;          // 玩家加入/离开
+      if (p.online !== c.online) return true; // 上下线变化
+      if (cat(p.latency) !== cat(c.latency)) return true; // 延迟档位变化
+    }
+    return false;
   }
 
   broadcast(msg) {
