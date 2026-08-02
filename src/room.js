@@ -223,6 +223,34 @@ export class Room {
         }
         break;
 
+      case 'drawOffer': {
+        // 求和请求：仅转发给对方。服务端不裁决，由双方客户端确认。
+        if (this.gameOver) return;
+        for (const [id, c] of this.connections) {
+          if (id !== wsId) this.sendMessage(c.ws, { type: 'drawOffer', color: conn.color });
+        }
+        break;
+      }
+
+      case 'drawAccept': {
+        // 对方同意求和：判和棋并广播终局
+        if (this.gameOver) return;
+        this.gameOver = true;
+        this.winner = null;
+        this.draw = true;
+        this.broadcast({ type: 'gameOver', winner: null, draw: true });
+        this.broadcastSync();
+        break;
+      }
+
+      case 'drawDecline': {
+        // 拒绝求和：仅通知发起方
+        for (const [id, c] of this.connections) {
+          if (id !== wsId) this.sendMessage(c.ws, { type: 'drawDecline' });
+        }
+        break;
+      }
+
       case 'chat': {
         // E2E 加密聊天：仅转发密文给对手，不读取内容（发送方本地直接显示，无需回环）
         const payload = { type: 'chat', color: conn.color, ts: Date.now() };

@@ -106,7 +106,13 @@ body {
 
 /* 聊天面板 */
 .chat-panel { flex-shrink: 0; display: flex; flex-direction: column; background: linear-gradient(180deg, rgba(28,34,56,0.95), rgba(19,24,41,0.85)); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; height: 170px; }
-.chat-header { flex-shrink: 0; padding: 6px 12px; font-size: 12px; font-weight: 600; color: var(--text-dim); letter-spacing: 0.5px; border-bottom: 1px solid var(--border); background: rgba(10,13,26,0.4); }
+.chat-header { flex-shrink: 0; padding: 6px 12px; font-size: 12px; font-weight: 600; color: var(--text-dim); letter-spacing: 0.5px; border-bottom: 1px solid var(--border); background: rgba(10,13,26,0.4); display: flex; align-items: center; gap: 8px; }
+.chat-badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--bad); color: #fff; font-size: 11px; line-height: 18px; text-align: center; font-weight: 700; }
+.chat-badge.hidden { display: none; }
+.chat-peer-status { margin-left: auto; font-size: 11px; font-weight: 500; color: var(--text-dim); display: flex; align-items: center; gap: 5px; }
+.chat-peer-status::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.chat-peer-status.online { color: var(--good); }
+.chat-peer-status.offline { color: var(--bad); }
 .chat-messages { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.4; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .chat-messages::-webkit-scrollbar { width: 5px; }
 .chat-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
@@ -294,10 +300,15 @@ body {
     <div class="button-row">
       <button class="btn" id="copyBtn" onclick="copyLink()">复制链接邀请好友</button>
       <button class="btn btn-secondary" id="waitBtn" onclick="sendWaitNotice()">等一会</button>
+      <button class="btn btn-secondary" id="drawBtn" onclick="sendDrawOffer()">求和</button>
     </div>
   </div>
   <aside class="chat-panel">
-    <div class="chat-header">聊天室</div>
+    <div class="chat-header">
+      <span>聊天室</span>
+      <span class="chat-badge hidden" id="chatBadge">0</span>
+      <span class="chat-peer-status" id="chatPeerStatus"></span>
+    </div>
     <div class="chat-messages" id="chatMessages"></div>
     <form class="chat-input-row" id="chatForm">
       <input type="text" id="chatInput" placeholder="输入消息..." autocomplete="off" maxlength="500">
@@ -337,6 +348,19 @@ body {
 <div class="rematch-modal hidden" id="rematchWaiting">
   <div class="rematch-modal-text">等待对方同意...</div>
   <button class="btn btn-secondary" onclick="cancelRematch()">取消</button>
+</div>
+
+<div class="rematch-modal hidden" id="drawModal">
+  <div class="rematch-modal-text" id="drawModalText">对方请求求和</div>
+  <div class="rematch-buttons">
+    <button class="btn" onclick="acceptDraw()">同意</button>
+    <button class="btn btn-secondary" onclick="declineDraw()">拒绝</button>
+  </div>
+</div>
+
+<div class="rematch-modal hidden" id="drawWaiting">
+  <div class="rematch-modal-text">等待对方回应求和...</div>
+  <button class="btn btn-secondary" onclick="cancelDraw()">取消</button>
 </div>
 
 <div class="promotion-modal hidden" id="promotionModal">
@@ -916,6 +940,27 @@ let myKeyPair = null;
 let sharedSecretKey = null;
 let peerKeyBase64 = null;
 let pendingChatQueue = [];
+// 聊天记录持久化：重连/刷新后从数组重建 DOM，避免消息丢失
+let chatHistory = [];
+let chatUnread = 0;
+let chatFocused = true;
+const CHAT_STORAGE_KEY = 'chatHistory_' + (new URLSearchParams(location.search).get('room') || '');
+
+// 从 sessionStorage 恢复聊天记录（页面刷新后仍保留，关闭标签页则清除）
+function loadChatHistory() {
+  try {
+    const raw = sessionStorage.getItem(CHAT_STORAGE_KEY);
+    if (raw) chatHistory = JSON.parse(raw) || [];
+  } catch (e) { chatHistory = []; }
+}
+
+function saveChatHistory() {
+  try {
+    // 仅保留最近 50 条，避免存储膨胀
+    const trimmed = chatHistory.slice(-50);
+    sessionStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(trimmed));
+  } catch (e) {}
+}
 
 function generateRoomId() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -939,6 +984,9 @@ function init() {
   connect();
   buildBoard();
   setupChat();
+  // 刷新后从 sessionStorage 恢复聊天记录并立即渲染（无需等待重连）
+  loadChatHistory();
+  renderChatHistory();
 }
 
 function buildBoard() {
@@ -1551,6 +1599,9 @@ function connect() {
         setRematchSelectDefaults();
         setStatus('');
         updateHeader();
+        // 重连后从内存重建聊天记录，恢复对方在线状态
+        renderChatHistory();
+        setPeerOnline(true);
         break;
       }
 
@@ -1583,6 +1634,9 @@ function connect() {
         if (!gameOver && myColor) {
           setStatus(myColor === currentTurn ? '轮到你了！' : '等待对手落子...');
         }
+        // 新一局开始时恢复求和按钮
+        var drawBtnSync = document.getElementById('drawBtn');
+        if (drawBtnSync) drawBtnSync.style.display = '';
         break;
 
       case 'moveUpdate': {
@@ -1649,6 +1703,11 @@ function connect() {
         }
         setRematchSelectDefaults();
         updateHeader();
+        // 终局后求和按钮不再可用
+        var drawBtn = document.getElementById('drawBtn');
+        if (drawBtn) drawBtn.style.display = 'none';
+        document.getElementById('drawModal').classList.add('hidden');
+        document.getElementById('drawWaiting').classList.add('hidden');
         break;
 
       case 'check':
@@ -1690,12 +1749,12 @@ function connect() {
 
       case 'opponentLeft':
         setStatus('对手已断开，等待重连...');
-        appendSystemMessage('对手已断开连接');
+        setPeerOnline(false);
         break;
 
       case 'opponentRejoin':
         setStatus('');
-        appendSystemMessage('对手已重新连接');
+        setPeerOnline(true);
         break;
 
       case 'waitNotice':
@@ -1704,6 +1763,23 @@ function connect() {
 
       case 'waitAck':
         waitAckReceived = true;
+        break;
+
+      case 'drawOffer':
+        // 对方发起求和：弹窗让我方同意/拒绝
+        document.getElementById('drawWaiting').classList.add('hidden');
+        document.getElementById('drawModalText').textContent = '对方请求求和，是否同意？';
+        document.getElementById('drawModal').classList.remove('hidden');
+        break;
+
+      case 'drawDecline':
+        // 对方拒绝求和（或取消）：关闭我方等待弹窗
+        document.getElementById('drawWaiting').classList.add('hidden');
+        setStatus('对方拒绝了求和', true);
+        break;
+
+      case 'drawAccept':
+        // drawAccept 由服务端处理为 gameOver，前端不单独处理（gameOver 会到达）
         break;
 
       case 'chat': {
@@ -1822,6 +1898,37 @@ function showWaitNotice(text) {
   document.body.appendChild(el);
 }
 
+// === 求和（和棋请求） ===
+function sendDrawOffer() {
+  if (gameOver) return;
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'drawOffer' }));
+    document.getElementById('drawWaiting').classList.remove('hidden');
+  }
+}
+
+function acceptDraw() {
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'drawAccept' }));
+  }
+  document.getElementById('drawModal').classList.add('hidden');
+}
+
+function declineDraw() {
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'drawDecline' }));
+  }
+  document.getElementById('drawModal').classList.add('hidden');
+}
+
+function cancelDraw() {
+  // 取消等同于拒绝（对方若已收到请求，会收到 decline）
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'drawDecline' }));
+  }
+  document.getElementById('drawWaiting').classList.add('hidden');
+}
+
 function copyLink() {
   const url = location.href;
   if (navigator.clipboard) {
@@ -1897,7 +2004,6 @@ async function onPeerPubKey(newKeyBase64) {
     if (ws && ws.readyState === 1) {
       ws.send(JSON.stringify({ type: 'pubKey', key: arrayBufferToBase64(pubKeyBytes) }));
     }
-    appendSystemMessage('加密通道已建立');
     // 发送通道建立前排队等待的消息
     while (pendingChatQueue.length && sharedSecretKey) {
       const text = pendingChatQueue.shift();
@@ -1960,6 +2066,8 @@ async function decryptChat(ivBase64, ctBase64) {
 function setupChat() {
   const form = document.getElementById('chatForm');
   const input = document.getElementById('chatInput');
+  const box = document.getElementById('chatMessages');
+
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     const text = (input.value || '').trim();
@@ -1968,11 +2076,33 @@ function setupChat() {
     input.focus();
     sendChatEncrypted(text.slice(0, 500));
   });
+
+  // 输入框/消息区获得焦点时视为已读，清除未读红点
+  const markRead = () => {
+    if (chatUnread > 0) { chatUnread = 0; updateChatBadge(); }
+    chatFocused = true;
+  };
+  input.addEventListener('focus', markRead);
+  box.addEventListener('scroll', markRead);
+  box.addEventListener('mousedown', markRead);
+  // 点击消息区也视为已读（移动端 tap 不一定触发 focus）
+  box.addEventListener('click', markRead);
+  window.addEventListener('focus', markRead);
 }
 
-function appendChatMessage(color, text, ts) {
+// 重建聊天 DOM（重连或首次渲染时从 chatHistory 恢复）
+function renderChatHistory() {
   const box = document.getElementById('chatMessages');
   if (!box) return;
+  box.innerHTML = '';
+  for (const item of chatHistory) {
+    if (item.sys) box.appendChild(createSystemMsgEl(item.text));
+    else box.appendChild(createChatMsgEl(item.color, item.text));
+  }
+  box.scrollTop = box.scrollHeight;
+}
+
+function createChatMsgEl(color, text) {
   const msg = document.createElement('div');
   msg.className = 'chat-msg';
   const name = document.createElement('span');
@@ -1983,20 +2113,68 @@ function appendChatMessage(color, text, ts) {
   body.textContent = text;
   msg.appendChild(name);
   msg.appendChild(body);
-  box.appendChild(msg);
-  // 仅在用户贴近底部时自动滚动，避免回看历史时被强制拉到底
-  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
-  if (nearBottom) box.scrollTop = box.scrollHeight;
+  return msg;
 }
 
-function appendSystemMessage(text) {
-  const box = document.getElementById('chatMessages');
-  if (!box) return;
+function createSystemMsgEl(text) {
   const msg = document.createElement('div');
   msg.className = 'chat-msg sys';
   msg.textContent = text;
-  box.appendChild(msg);
+  return msg;
+}
+
+function appendChatMessage(color, text, ts) {
+  chatHistory.push({ color, text, ts });
+  if (chatHistory.length > 200) chatHistory.shift();
+  saveChatHistory();
+  const box = document.getElementById('chatMessages');
+  if (!box) return;
+  box.appendChild(createChatMsgEl(color, text));
+  // 仅在用户贴近底部时自动滚动，避免回看历史时被强制拉到底
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+  if (nearBottom) box.scrollTop = box.scrollHeight;
+  // 收到对方消息时计入未读
+  if (color !== myColor) incrementUnread();
+}
+
+function appendSystemMessage(text) {
+  chatHistory.push({ sys: true, text });
+  if (chatHistory.length > 200) chatHistory.shift();
+  saveChatHistory();
+  const box = document.getElementById('chatMessages');
+  if (!box) return;
+  box.appendChild(createSystemMsgEl(text));
   box.scrollTop = box.scrollHeight;
+}
+
+function incrementUnread() {
+  if (chatFocused && document.hasFocus && document.hasFocus()) return;
+  chatUnread++;
+  updateChatBadge();
+}
+
+function updateChatBadge() {
+  const badge = document.getElementById('chatBadge');
+  if (!badge) return;
+  if (chatUnread > 0) {
+    badge.textContent = chatUnread > 99 ? '99+' : chatUnread;
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+  }
+}
+
+// 更新对方在线/离线状态指示
+function setPeerOnline(online) {
+  const el = document.getElementById('chatPeerStatus');
+  if (!el) return;
+  if (online) {
+    el.className = 'chat-peer-status online';
+    el.textContent = '在线';
+  } else {
+    el.className = 'chat-peer-status offline';
+    el.textContent = '离线';
+  }
 }
 
 init();
