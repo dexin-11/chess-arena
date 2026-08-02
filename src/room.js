@@ -222,6 +222,19 @@ export class Room {
           }
         }
         break;
+
+      case 'chat': {
+        // 聊天消息：广播给房间内所有人（含发送者，由客户端本地去重/渲染）
+        const text = typeof msg.text === 'string' ? msg.text.slice(0, 500).trim() : '';
+        if (!text) return;
+        this.broadcast({
+          type: 'chat',
+          color: conn.color,
+          text,
+          ts: Date.now(),
+        });
+        break;
+      }
     }
   }
 

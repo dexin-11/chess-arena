@@ -68,8 +68,9 @@ const GAME_HTML = `<!DOCTYPE html>
   --text: #e8ecf4; --text-dim: #8892b0;
   --good: #4ecca3; --warn: #f0a500; --bad: #e94560;
   --board-wood: #DEB887; --board-line: #8B7355;
-  --board-size: min(96vw, calc(100vh - 130px));
-  --board-size: min(96vw, calc(100dvh - 130px));
+  /* 手机端：棋盘下方留出聊天面板（约 170px）+ 头部与按钮行开销 */
+  --board-size: min(96vw, calc(100vh - 320px));
+  --board-size: min(96vw, calc(100dvh - 320px));
 }
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
@@ -98,7 +99,28 @@ body {
 .latency-ok { color: var(--warn); }
 .latency-bad { color: var(--bad); }
 
-.board-container { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 8px; }
+.board-container { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 8px; }
+
+/* 游戏区域：手机端纵向（棋盘在上、聊天在下），桌面端横向（棋盘在左、聊天在右） */
+.game-area { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 0 8px 8px; }
+
+/* 聊天面板 */
+.chat-panel { flex-shrink: 0; display: flex; flex-direction: column; background: linear-gradient(180deg, rgba(28,34,56,0.95), rgba(19,24,41,0.85)); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; height: 170px; }
+.chat-header { flex-shrink: 0; padding: 6px 12px; font-size: 12px; font-weight: 600; color: var(--text-dim); letter-spacing: 0.5px; border-bottom: 1px solid var(--border); background: rgba(10,13,26,0.4); }
+.chat-messages { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.4; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.chat-messages::-webkit-scrollbar { width: 5px; }
+.chat-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.chat-msg { word-break: break-word; overflow-wrap: anywhere; }
+.chat-msg .chat-name { font-weight: 700; margin-right: 6px; font-size: 12px; }
+.chat-msg .chat-name.color-black { color: #fff; }
+.chat-msg .chat-name.color-white { color: #e0e0e0; }
+.chat-msg .chat-name.color-red { color: #ff6b6b; }
+.chat-msg .chat-text { color: var(--text); }
+.chat-msg.sys { color: var(--text-dim); font-size: 11px; text-align: center; font-style: italic; }
+.chat-input-row { flex-shrink: 0; display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--border); background: rgba(10,13,26,0.4); }
+.chat-input-row input { flex: 1; min-width: 0; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-2); color: var(--text); font-size: 13px; font-family: 'Sora', sans-serif; outline: none; }
+.chat-input-row input:focus { border-color: var(--accent); }
+.chat-send-btn { padding: 7px 14px; font-size: 12px; flex-shrink: 0; }
 
 .status-msg { font-size: 13px; color: var(--text-dim); min-height: 18px; text-align: center; letter-spacing: 0.5px; flex-shrink: 0; font-weight: 500; }
 .status-msg.check-msg { color: var(--bad); font-weight: 700; font-size: 14px; animation: checkPulse 1s ease-in-out infinite; }
@@ -212,8 +234,9 @@ body {
 
 @media (max-width: 540px) {
   :root {
-    --board-size: min(98vw, calc(100vh - 120px));
-    --board-size: min(98vw, calc(100dvh - 120px));
+    /* 小屏手机：聊天面板收窄至 150px，棋盘高度同步调小 */
+    --board-size: min(98vw, calc(100vh - 300px));
+    --board-size: min(98vw, calc(100dvh - 300px));
   }
   .header { padding: 6px 10px; padding-top: max(6px, env(safe-area-inset-top)); }
   .header-row { font-size: 12px; gap: 6px; }
@@ -222,14 +245,31 @@ body {
   .btn { padding: 6px 12px; font-size: 12px; }
   .status-msg { font-size: 12px; }
   .board { border-radius: 6px; padding: clamp(4px, 1.4vmin, 10px); }
+  .chat-panel { height: 150px; }
+  .chat-messages { font-size: 12px; }
+  .chat-input-row input { font-size: 12px; padding: 6px 8px; }
 }
+/* 横屏手机：屏幕宽而矮，聊天改到侧面（窄面板）以免棋盘过小 */
 @media (orientation: landscape) and (max-height: 500px) {
   :root {
-    --board-size: min(85vh, 80vw);
-    --board-size: min(85dvh, 80vw);
+    --board-size: min(calc(100vh - 90px), calc(100vw - 280px));
+    --board-size: min(calc(100dvh - 90px), calc(100vw - 280px));
   }
   .header { flex-direction: row; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; }
   .player-status { font-size: 10px; }
+  .game-area { flex-direction: row; }
+  .board-container { flex: 1; min-width: 0; }
+  .chat-panel { width: 240px; height: auto; flex: 0 0 240px; }
+}
+/* 桌面/平板：聊天固定在右侧 320px，棋盘占剩余宽度 */
+@media (min-width: 880px) {
+  :root {
+    --board-size: min(calc(100vh - 130px), calc(100vw - 400px));
+    --board-size: min(calc(100dvh - 130px), calc(100vw - 400px));
+  }
+  .game-area { flex-direction: row; gap: 12px; padding: 0 12px 12px; }
+  .board-container { flex: 1; min-width: 0; }
+  .chat-panel { width: 320px; height: auto; flex: 0 0 320px; }
 }
 </style>
 </head>
@@ -247,13 +287,23 @@ body {
   </div>
 </div>
 
-<div class="board-container">
-  <div class="status-msg" id="statusMsg"></div>
-  <div class="board" id="board"></div>
-  <div class="button-row">
-    <button class="btn" id="copyBtn" onclick="copyLink()">复制链接邀请好友</button>
-    <button class="btn btn-secondary" id="waitBtn" onclick="sendWaitNotice()">等一会</button>
+<div class="game-area">
+  <div class="board-container">
+    <div class="status-msg" id="statusMsg"></div>
+    <div class="board" id="board"></div>
+    <div class="button-row">
+      <button class="btn" id="copyBtn" onclick="copyLink()">复制链接邀请好友</button>
+      <button class="btn btn-secondary" id="waitBtn" onclick="sendWaitNotice()">等一会</button>
+    </div>
   </div>
+  <aside class="chat-panel">
+    <div class="chat-header">聊天室</div>
+    <div class="chat-messages" id="chatMessages"></div>
+    <form class="chat-input-row" id="chatForm">
+      <input type="text" id="chatInput" placeholder="输入消息..." autocomplete="off" maxlength="500">
+      <button type="submit" class="btn chat-send-btn">发送</button>
+    </form>
+  </aside>
 </div>
 
 <div class="waiting-overlay" id="waitingOverlay">
@@ -883,6 +933,7 @@ function init() {
   // 先启动 WebSocket 连接（与 DOM 构建并行，减少首次交互延迟）
   connect();
   buildBoard();
+  setupChat();
 }
 
 function buildBoard() {
@@ -1589,10 +1640,12 @@ function connect() {
 
       case 'opponentLeft':
         setStatus('对手已断开，等待重连...');
+        appendSystemMessage('对手已断开连接');
         break;
 
       case 'opponentRejoin':
         setStatus('');
+        appendSystemMessage('对手已重新连接');
         break;
 
       case 'waitNotice':
@@ -1601,6 +1654,10 @@ function connect() {
 
       case 'waitAck':
         waitAckReceived = true;
+        break;
+
+      case 'chat':
+        appendChatMessage(msg.color, msg.text, msg.ts);
         break;
     }
   };
@@ -1722,6 +1779,50 @@ function copyLink() {
       document.getElementById('copyBtn').textContent = '复制链接邀请好友';
     }, 2000);
   }
+}
+
+// === 聊天室 ===
+function setupChat() {
+  const form = document.getElementById('chatForm');
+  const input = document.getElementById('chatInput');
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = (input.value || '').trim();
+    if (!text) return;
+    if (!ws || ws.readyState !== 1) return;
+    ws.send(JSON.stringify({ type: 'chat', text: text.slice(0, 500) }));
+    input.value = '';
+    input.focus();
+  });
+}
+
+function appendChatMessage(color, text, ts) {
+  const box = document.getElementById('chatMessages');
+  if (!box) return;
+  const msg = document.createElement('div');
+  msg.className = 'chat-msg';
+  const name = document.createElement('span');
+  name.className = 'chat-name color-' + (color || 'black');
+  name.textContent = color ? (colorLabel(color) + '（' + (color === myColor ? '我' : '对手') + '）') : '玩家';
+  const body = document.createElement('span');
+  body.className = 'chat-text';
+  body.textContent = text;
+  msg.appendChild(name);
+  msg.appendChild(body);
+  box.appendChild(msg);
+  // 仅在用户贴近底部时自动滚动，避免回看历史时被强制拉到底
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+  if (nearBottom) box.scrollTop = box.scrollHeight;
+}
+
+function appendSystemMessage(text) {
+  const box = document.getElementById('chatMessages');
+  if (!box) return;
+  const msg = document.createElement('div');
+  msg.className = 'chat-msg sys';
+  msg.textContent = text;
+  box.appendChild(msg);
+  box.scrollTop = box.scrollHeight;
 }
 
 init();
