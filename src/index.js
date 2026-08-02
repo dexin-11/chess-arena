@@ -240,6 +240,13 @@ body {
 .review-bar .nav-btn:hover { background: #3a4578; }
 .review-bar .nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .review-bar .exit-btn { background: var(--accent); margin-left: 6px; }
+.review-bar .sim-btn { background: #1a6b4e; }
+.review-bar .sim-btn:hover { background: #248a68; }
+.review-bar .sim-btn.active { background: #4ecca3; color: #0a0d1a; }
+.review-bar .export-btn { background: #6b5b1a; }
+.review-bar .export-btn:hover { background: #8a7a28; }
+.review-bar .divider { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+.review-bar .review-sim-hint { font-size: 11px; color: var(--good); font-weight: 600; }
 
 .rematch-modal { position: fixed; inset: 0; background: rgba(10,13,26,0.88); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; z-index: 110; }
 .rematch-modal.hidden { display: none; }
@@ -368,6 +375,11 @@ body {
   <span class="review-step" id="reviewStep">0 / 0</span>
   <button class="btn nav-btn" id="reviewNextBtn" onclick="reviewStep(1)" title="下一步">▶</button>
   <button class="btn nav-btn" id="reviewEndBtn" onclick="reviewGoto(-1)" title="回到结局">⏭</button>
+  <span class="divider"></span>
+  <button class="btn sim-btn" id="simBtn" onclick="toggleSimMode()" title="模拟重下">模拟重下</button>
+  <span class="review-sim-hint hidden" id="simHint">模拟重下中：点击棋盘轮流落子</span>
+  <span class="divider"></span>
+  <button class="btn export-btn" onclick="exportReviewHTML()" title="导出为 HTML">导出</button>
   <button class="btn exit-btn" onclick="exitReview()">退出</button>
 </div>
 
@@ -972,6 +984,10 @@ let pendingPromotionMove = null;
 let moveHistory = []; // [{ gameType, board, chessState, xiangqiState, lastMove, checkColor, currentTurn }]
 let replaying = false;
 let replayIndex = 0;
+// 模拟重下：在复盘基础上从当前步开始，本地轮流落子（不发送到服务端）
+let simMode = false;
+let simColor = null; // 模拟重下下一手颜色（gomoku: black/white）
+let simMoves = []; // 模拟新增的走子记录（gomoku: {r,c,color}），退出时丢弃
 var waitAckReceived = false;
 // 端到端加密状态（ECDH P-256 + AES-GCM）
 let myKeyPair = null;
@@ -1097,6 +1113,8 @@ function renderGomoku() {
 }
 
 function onGomokuCellClick(r, c) {
+  // 模拟重下模式：本地轮流落子，不发送到服务端
+  if (simMode) { onSimCellClick(r, c); return; }
   if (gameOver || !myColor || myColor !== currentTurn) return;
   if (boardData[r][c]) return;
   ws.send(JSON.stringify({ type: 'move', row: r, col: c }));
@@ -1573,6 +1591,8 @@ function enterReview() {
   if (moveHistory.length < 2) { setStatus('暂无复盘数据'); return; }
   replaying = true;
   replayIndex = moveHistory.length - 1; // 默认停在结局
+  simMode = false;
+  simMoves = [];
   document.getElementById('resultOverlay').classList.add('hidden');
   document.getElementById('reviewBar').classList.remove('hidden');
   applyReviewSnapshot();
@@ -1580,6 +1600,7 @@ function enterReview() {
 
 function exitReview() {
   replaying = false;
+  exitSimMode();
   exitReviewUI();
   // 恢复终局棋盘
   if (moveHistory.length > 0) {
@@ -1598,6 +1619,8 @@ function exitReviewUI() {
 
 function reviewStep(delta) {
   if (!replaying || moveHistory.length === 0) return;
+  // 复盘导航前退出模拟重下模式，回到真实历史
+  if (simMode) exitSimMode();
   let idx = replayIndex + delta;
   if (idx < 0) idx = 0;
   if (idx > moveHistory.length - 1) idx = moveHistory.length - 1;
@@ -1607,6 +1630,7 @@ function reviewStep(delta) {
 
 function reviewGoto(target) {
   if (!replaying || moveHistory.length === 0) return;
+  if (simMode) exitSimMode();
   replayIndex = (target < 0) ? moveHistory.length - 1 : Math.min(target, moveHistory.length - 1);
   applyReviewSnapshot();
 }
@@ -1644,14 +1668,235 @@ function restoreFromSnapshot(snap) {
 function updateReviewControls() {
   const total = moveHistory.length;
   const stepEl = document.getElementById('reviewStep');
-  if (stepEl) stepEl.textContent = (total > 0 ? (replayIndex) : 0) + ' / ' + Math.max(0, total - 1);
-  const atStart = replayIndex <= 0;
-  const atEnd = replayIndex >= total - 1;
+  if (stepEl) {
+    // 模拟重下模式下步数显示真实步数 + 模拟新增步数
+    const shown = simMode ? (replayIndex + simMoves.length) : replayIndex;
+    const shownTotal = simMode ? (total - 1 + simMoves.length) : Math.max(0, total - 1);
+    stepEl.textContent = (total > 0 ? shown : 0) + ' / ' + shownTotal;
+  }
+  const atStart = !simMode && replayIndex <= 0;
+  const atEnd = !simMode && replayIndex >= total - 1;
   const set = (id, disabled) => { const el = document.getElementById(id); if (el) el.disabled = disabled; };
   set('reviewStartBtn', atStart);
   set('reviewPrevBtn', atStart);
   set('reviewNextBtn', atEnd);
   set('reviewEndBtn', atEnd);
+  // 模拟重下按钮高亮 + 提示
+  const simBtn = document.getElementById('simBtn');
+  if (simBtn) simBtn.classList.toggle('active', simMode);
+  const simHint = document.getElementById('simHint');
+  if (simHint) simHint.classList.toggle('hidden', !simMode);
+}
+
+// === 模拟重下 ===
+// 在当前复盘位置基础上，本地轮流落子（仅五子棋：黑白轮流；国际象棋/中国象棋不支持模拟重下）
+function toggleSimMode() {
+  if (!replaying) return;
+  if (simMode) exitSimMode();
+  else enterSimMode();
+}
+
+function enterSimMode() {
+  if (gameType !== 'gomoku') { setStatus('模拟重下仅支持五子棋'); return; }
+  // 从当前复盘快照开始模拟：以快照的 currentTurn 作为下一手颜色
+  const snap = moveHistory[replayIndex];
+  if (!snap) return;
+  simMode = true;
+  simMoves = [];
+  // 五子棋 currentTurn 为 black/white；开局快照 currentTurn=black
+  simColor = snap.currentTurn || 'black';
+  updateReviewControls();
+  setStatus('模拟重下中：点击棋盘轮流落子，再点「模拟重下」退出');
+}
+
+function exitSimMode() {
+  if (!simMode) return;
+  simMode = false;
+  simMoves = [];
+  simColor = null;
+  // 恢复到当前复盘快照
+  applyReviewSnapshot();
+}
+
+// 复盘+模拟重下模式下的棋盘点击处理（替代正常走子流程）
+function onSimCellClick(r, c) {
+  if (!simMode || gameType !== 'gomoku') return;
+  if (boardData[r] && boardData[r][c]) return; // 已有棋子
+  boardData[r][c] = simColor;
+  simMoves.push({ r, c, color: simColor });
+  lastMove = { from: { r, c }, to: { r, c } };
+  simColor = simColor === 'black' ? 'white' : 'black';
+  renderGomoku();
+  updateReviewControls();
+}
+
+// === 导出复盘为 HTML ===
+// 生成自包含 HTML（含所有快照与导航控件），可在任意浏览器离线打开复盘
+function exportReviewHTML() {
+  if (moveHistory.length < 2) { setStatus('暂无复盘数据可导出'); return; }
+  // 序列化快照（含模拟重下合并到末尾的虚拟快照）
+  const snaps = moveHistory.map(s => ({
+    gameType: s.gameType,
+    board: s.board,
+    lastMove: s.lastMove,
+    checkColor: s.checkColor || null,
+    currentTurn: s.currentTurn,
+  }));
+  // 若处于模拟重下模式，附加当前模拟状态作为最后一步
+  if (simMode && simMoves.length > 0) {
+    const last = snaps[snaps.length - 1];
+    const simBoard = last.board ? JSON.parse(JSON.stringify(last.board)) : null;
+    for (const m of simMoves) {
+      if (simBoard) simBoard[m.r][m.c] = m.color;
+    }
+    snaps.push({
+      gameType: last.gameType,
+      board: simBoard,
+      lastMove: simMoves.length > 0 ? { from: { r: simMoves[simMoves.length-1].r, c: simMoves[simMoves.length-1].c }, to: { r: simMoves[simMoves.length-1].r, c: simMoves[simMoves.length-1].c } } : last.lastMove,
+      checkColor: null,
+      currentTurn: simColor,
+    });
+  }
+  const gameLabel = snaps[0].gameType === 'chess' ? '国际象棋' : (snaps[0].gameType === 'xiangqi' ? '中国象棋' : '五子棋');
+  const data = JSON.stringify(snaps);
+  const html = buildExportHTML(snaps, gameLabel, data);
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const ts = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  a.download = 'review_' + ts.getFullYear() + pad(ts.getMonth()+1) + pad(ts.getDate()) + '_' + pad(ts.getHours()) + pad(ts.getMinutes()) + '.html';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// 构建自包含复盘 HTML（含内联 CSS + JS，快照内嵌为 JSON）
+// 注意：本函数位于外层 GAME_HTML 模板字符串内，不能使用模板插值语法，
+// 改用字符串拼接 + 占位符替换，避免外层模板提前求值。
+function buildExportHTML(snaps, gameLabel, dataJson) {
+  var css = [
+    '* { margin: 0; padding: 0; box-sizing: border-box; }',
+    "body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0d1a; color: #e8ecf4; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 16px; }",
+    'h1 { font-size: 20px; margin-bottom: 12px; color: #e94560; }',
+    '.board-wrap { width: min(92vw, 600px); aspect-ratio: 1; background: #DEB887; border-radius: 8px; padding: 14px; box-shadow: 0 12px 40px rgba(0,0,0,0.6); }',
+    '.board-wrap.chess { background: transparent; padding: 0; overflow: hidden; }',
+    '.board-wrap.xiangqi { background: linear-gradient(135deg, #f0d9a4, #e6c388); aspect-ratio: 9/10; }',
+    '.grid { width: 100%; height: 100%; display: grid; }',
+    '.cell { position: relative; cursor: default; }',
+    ".cell::before { content: ''; position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: #8B7355; }",
+    ".cell::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: #8B7355; }",
+    '.stone { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 82%; height: 82%; border-radius: 50%; }',
+    '.stone.black { background: radial-gradient(circle at 35% 30%, #4a4a4a, #050505 70%); }',
+    '.stone.white { background: radial-gradient(circle at 35% 30%, #fff, #b0b0b0 80%); }',
+    '.chess-cell { display: flex; align-items: center; justify-content: center; font-size: 7vmin; }',
+    '.chess-cell.light { background: #f0d9b5; }',
+    '.chess-cell.dark { background: #b58863; }',
+    '.chess-cell.last-move { box-shadow: inset 0 0 0 4px rgba(255,213,79,0.85); }',
+    '.chess-cell.check-king { box-shadow: inset 0 0 0 4px #ff3333; }',
+    '.chess-piece.white { color: #f8f6f0; text-shadow: -1px 0 0 #2a2a2a,1px 0 0 #2a2a2a,0 -1px 0 #2a2a2a,0 1px 0 #2a2a2a,-1px -1px 0 #2a2a2a,1px -1px 0 #2a2a2a,-1px 1px 0 #2a2a2a,1px 1px 0 #2a2a2a; }',
+    '.chess-piece.black { color: #1a1a1a; }',
+    '.xiangqi-cell { display: flex; align-items: center; justify-content: center; font-size: 6vmin; font-weight: 700; }',
+    '.xiangqi-cell.last-move { box-shadow: inset 0 0 0 3px rgba(233,69,96,0.4); }',
+    '.xpiece.red { color: #c0392b; }',
+    '.xpiece.black { color: #1a1a1a; }',
+    '.controls { display: flex; align-items: center; gap: 8px; margin-top: 16px; flex-wrap: wrap; justify-content: center; }',
+    '.controls button { padding: 8px 14px; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; background: #2a3458; color: #fff; font-weight: 600; }',
+    '.controls button:hover { background: #3a4578; }',
+    '.controls button:disabled { opacity: 0.35; cursor: not-allowed; }',
+    '.controls .step { font-family: monospace; font-weight: 700; min-width: 70px; text-align: center; }',
+  ].join('\n');
+  var js = [
+    'function render() {',
+    '  var s = SNAPS[idx];',
+    '  var board = document.getElementById("board");',
+    '  board.className = "board-wrap" + (s.gameType === "chess" ? " chess" : (s.gameType === "xiangqi" ? " xiangqi" : ""));',
+    '  board.innerHTML = "";',
+    '  var grid = document.createElement("div");',
+    '  grid.className = "grid";',
+    '  var rows, cols;',
+    '  if (s.gameType === "gomoku") { rows = 15; cols = 15; }',
+    '  else if (s.gameType === "chess") { rows = 8; cols = 8; }',
+    '  else { rows = 10; cols = 9; }',
+    '  grid.style.gridTemplateColumns = "repeat(" + cols + ", 1fr)";',
+    '  grid.style.gridTemplateRows = "repeat(" + rows + ", 1fr)";',
+    '  for (var r = 0; r < rows; r++) {',
+    '    for (var c = 0; c < cols; c++) {',
+    '      var cell = document.createElement("div");',
+    '      if (s.gameType === "chess") {',
+    '        var isLight = (r + c) % 2 === 0;',
+    '        cell.className = "chess-cell " + (isLight ? "light" : "dark");',
+    '      } else if (s.gameType === "xiangqi") {',
+    '        cell.className = "xiangqi-cell";',
+    '      } else {',
+    '        cell.className = "cell";',
+    '      }',
+    '      var piece = s.board && s.board[r] ? s.board[r][c] : null;',
+    '      if (piece) {',
+    '        if (s.gameType === "gomoku") {',
+    '          var st = document.createElement("div");',
+    '          st.className = "stone " + piece;',
+    '          cell.appendChild(st);',
+    '        } else if (s.gameType === "chess") {',
+    '          var sp = document.createElement("span");',
+    '          sp.className = "chess-piece " + piece.color;',
+    '          sp.textContent = CHESS[piece.color][piece.type] || "";',
+    '          cell.appendChild(sp);',
+    '        } else {',
+    '          var sp2 = document.createElement("span");',
+    '          sp2.className = "xpiece " + piece.color;',
+    '          sp2.textContent = XIANGQI[piece.color][piece.type] || "";',
+    '          cell.appendChild(sp2);',
+    '        }',
+    '      }',
+    '      if (s.lastMove) {',
+    '        if ((s.lastMove.from && s.lastMove.from.r === r && s.lastMove.from.c === c) ||',
+    '            (s.lastMove.to && s.lastMove.to.r === r && s.lastMove.to.c === c)) {',
+    '          cell.classList.add("last-move");',
+    '        }',
+    '      }',
+    '      grid.appendChild(cell);',
+    '    }',
+    '  }',
+    '  board.appendChild(grid);',
+    '  document.getElementById("stepEl").textContent = idx + " / " + (SNAPS.length - 1);',
+    '  document.getElementById("startBtn").disabled = idx <= 0;',
+    '  document.getElementById("prevBtn").disabled = idx <= 0;',
+    '  document.getElementById("nextBtn").disabled = idx >= SNAPS.length - 1;',
+    '  document.getElementById("endBtn").disabled = idx >= SNAPS.length - 1;',
+    '}',
+    'function step(d) { var n = idx + d; if (n < 0) n = 0; if (n > SNAPS.length - 1) n = SNAPS.length - 1; idx = n; render(); }',
+    'function goto(t) { idx = t < 0 ? SNAPS.length - 1 : Math.min(t, SNAPS.length - 1); render(); }',
+    'document.addEventListener("keydown", function(e) {',
+    '  if (e.key === "ArrowLeft") step(-1);',
+    '  else if (e.key === "ArrowRight") step(1);',
+    '  else if (e.key === "Home") goto(0);',
+    '  else if (e.key === "End") goto(-1);',
+    '});',
+    'render();',
+  ].join('\n');
+  // 用占位符避免外层模板字符串插值
+  var html = '<!DOCTYPE html>\n'
+    + '<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n'
+    + '<meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
+    + '<title>复盘 - __GAME_LABEL__</title>\n<style>\n' + css + '\n</style>\n</head>\n<body>\n'
+    + '<h1>复盘 - __GAME_LABEL__</h1>\n'
+    + '<div class="board-wrap" id="board"></div>\n'
+    + '<div class="controls">\n'
+    + '  <button id="startBtn" onclick="goto(0)" title="开局">⏮</button>\n'
+    + '  <button id="prevBtn" onclick="step(-1)" title="上一步">◀</button>\n'
+    + '  <span class="step" id="stepEl">0 / 0</span>\n'
+    + '  <button id="nextBtn" onclick="step(1)" title="下一步">▶</button>\n'
+    + '  <button id="endBtn" onclick="goto(-1)" title="结局">⏭</button>\n'
+    + '</div>\n<script>\n'
+    + 'var SNAPS = __DATA_JSON__;\n'
+    + 'var idx = SNAPS.length - 1;\n'
+    + 'var CHESS = { white:{k:"♔",q:"♕",r:"♖",b:"♗",n:"♘",p:"♙"}, black:{k:"♚",q:"♛",r:"♜",b:"♝",n:"♞",p:"♟"} };\n'
+    + 'var XIANGQI = { red:{k:"帥",a:"仕",e:"相",h:"傌",r:"俥",c:"炮",p:"兵"}, black:{k:"將",a:"士",e:"象",h:"馬",r:"車",c:"炮",p:"卒"} };\n'
+    + js + '\n</script>\n</body>\n</html>';
+  return html.replace(/__GAME_LABEL__/g, gameLabel).replace(/__DATA_JSON__/g, dataJson);
 }
 
 function updateStatus(msg) {
@@ -1761,6 +2006,9 @@ function connect() {
         // 新一局/重连开始：清空复盘记录与状态
         moveHistory = [];
         replaying = false;
+        simMode = false;
+        simMoves = [];
+        simColor = null;
         exitReviewUI();
         hideAllModals();
         setRematchSelectDefaults();
