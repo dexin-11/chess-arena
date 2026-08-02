@@ -228,6 +228,18 @@ body {
 .rematch-select-row { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--text); }
 .rematch-select-row select { padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-2); color: var(--text); font-size: 14px; font-family: 'Sora', sans-serif; cursor: pointer; }
 .rematch-hint { font-size: 13px; color: var(--warn); min-height: 16px; text-align: center; }
+.result-buttons { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+
+/* 复盘控制条：固定在底部，不遮挡棋盘 */
+.review-bar { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px 14px; padding-bottom: max(10px, env(safe-area-inset-bottom)); background: linear-gradient(180deg, rgba(19,24,41,0.85), rgba(10,13,26,0.98)); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; z-index: 105; }
+.review-bar.hidden { display: none; }
+.review-bar .review-step { font-size: 13px; font-weight: 600; color: var(--text); font-family: 'JetBrains Mono', monospace; min-width: 64px; text-align: center; }
+.review-bar .review-title { font-size: 12px; color: var(--text-dim); letter-spacing: 0.5px; margin-right: 4px; }
+.review-bar .btn { padding: 7px 12px; font-size: 13px; }
+.review-bar .nav-btn { background: #2a3458; min-width: 40px; }
+.review-bar .nav-btn:hover { background: #3a4578; }
+.review-bar .nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.review-bar .exit-btn { background: var(--accent); margin-left: 6px; }
 
 .rematch-modal { position: fixed; inset: 0; background: rgba(10,13,26,0.88); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; z-index: 110; }
 .rematch-modal.hidden { display: none; }
@@ -343,7 +355,20 @@ body {
     </select>
   </div>
   <div class="rematch-hint" id="rematchHint"></div>
-  <button class="btn" id="rematchBtn" onclick="requestRematch()">再来一局</button>
+  <div class="result-buttons">
+    <button class="btn" id="rematchBtn" onclick="requestRematch()">再来一局</button>
+    <button class="btn btn-secondary" id="reviewBtn" onclick="enterReview()">复盘</button>
+  </div>
+</div>
+
+<div class="review-bar hidden" id="reviewBar">
+  <span class="review-title">复盘</span>
+  <button class="btn nav-btn" id="reviewStartBtn" onclick="reviewGoto(0)" title="回到开局">⏮</button>
+  <button class="btn nav-btn" id="reviewPrevBtn" onclick="reviewStep(-1)" title="上一步">◀</button>
+  <span class="review-step" id="reviewStep">0 / 0</span>
+  <button class="btn nav-btn" id="reviewNextBtn" onclick="reviewStep(1)" title="下一步">▶</button>
+  <button class="btn nav-btn" id="reviewEndBtn" onclick="reviewGoto(-1)" title="回到结局">⏭</button>
+  <button class="btn exit-btn" onclick="exitReview()">退出</button>
 </div>
 
 <div class="rematch-modal hidden" id="rematchModal">
@@ -943,6 +968,10 @@ let lastMove = null;
 let checkColor = null;
 let rematchRole = null; // 'requester' | 'accepter' | null
 let pendingPromotionMove = null;
+// 复盘：记录每一步的棋盘快照（含开局状态），复盘模式下按步渲染
+let moveHistory = []; // [{ gameType, board, chessState, xiangqiState, lastMove, checkColor, currentTurn }]
+let replaying = false;
+let replayIndex = 0;
 var waitAckReceived = false;
 // 端到端加密状态（ECDH P-256 + AES-GCM）
 let myKeyPair = null;
@@ -1502,6 +1531,128 @@ function updateHeader() {
   turnEl.textContent = gameOver ? '已结束' : colorLabel(currentTurn);
 }
 
+// === 复盘 ===
+// 快照当前棋盘与相关状态（深拷贝，避免后续走子污染历史记录）
+function snapshotState() {
+  let board;
+  if (gameType === 'chess') board = chessBoardData;
+  else if (gameType === 'xiangqi') board = xiangqiBoardData;
+  else board = boardData;
+  return {
+    gameType,
+    board: board ? JSON.parse(JSON.stringify(board)) : null,
+    chessState: chessState ? JSON.parse(JSON.stringify(chessState)) : null,
+    xiangqiState: xiangqiState ? JSON.parse(JSON.stringify(xiangqiState)) : null,
+    lastMove: lastMove ? JSON.parse(JSON.stringify(lastMove)) : null,
+    checkColor,
+    currentTurn,
+  };
+}
+
+// 浅比较两个棋盘是否相同（用于终局 sync 去重，避免重复记录最后一步）
+function boardsEqual(a, b) {
+  if (!a || !b) return a === b;
+  if (a.length !== b.length) return false;
+  for (let r = 0; r < a.length; r++) {
+    const ar = a[r], br = b[r];
+    if (!ar || !br || ar.length !== br.length) return false;
+    for (let c = 0; c < ar.length; c++) {
+      const av = ar[c], bv = br[c];
+      if (typeof av === 'object' && typeof bv === 'object') {
+        if (!av || !bv) return av === bv;
+        if (av.color !== bv.color || av.type !== bv.type) return false;
+      } else if (av !== bv) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+function enterReview() {
+  if (moveHistory.length < 2) { setStatus('暂无复盘数据'); return; }
+  replaying = true;
+  replayIndex = moveHistory.length - 1; // 默认停在结局
+  document.getElementById('resultOverlay').classList.add('hidden');
+  document.getElementById('reviewBar').classList.remove('hidden');
+  applyReviewSnapshot();
+}
+
+function exitReview() {
+  replaying = false;
+  exitReviewUI();
+  // 恢复终局棋盘
+  if (moveHistory.length > 0) {
+    restoreFromSnapshot(moveHistory[moveHistory.length - 1]);
+    renderBoard();
+  }
+  document.getElementById('resultOverlay').classList.remove('hidden');
+}
+
+// 仅隐藏复盘 UI（不恢复棋盘），用于新一局开始时清理
+function exitReviewUI() {
+  const bar = document.getElementById('reviewBar');
+  if (bar) bar.classList.add('hidden');
+}
+
+function reviewStep(delta) {
+  if (!replaying || moveHistory.length === 0) return;
+  let idx = replayIndex + delta;
+  if (idx < 0) idx = 0;
+  if (idx > moveHistory.length - 1) idx = moveHistory.length - 1;
+  replayIndex = idx;
+  applyReviewSnapshot();
+}
+
+function reviewGoto(target) {
+  if (!replaying || moveHistory.length === 0) return;
+  replayIndex = (target < 0) ? moveHistory.length - 1 : Math.min(target, moveHistory.length - 1);
+  applyReviewSnapshot();
+}
+
+// 将快照恢复到全局渲染状态并重绘（复盘模式下棋盘只读，不触发交互）
+function applyReviewSnapshot() {
+  const snap = moveHistory[replayIndex];
+  if (!snap) return;
+  restoreFromSnapshot(snap);
+  // 复盘时清空选中与合法走法提示，避免显示可走点
+  chessSelected = null;
+  chessLegalMoves = [];
+  xiangqiSelected = null;
+  xiangqiLegalMoves = [];
+  renderBoard();
+  updateReviewControls();
+}
+
+function restoreFromSnapshot(snap) {
+  gameType = snap.gameType;
+  if (snap.gameType === 'chess') {
+    chessBoardData = snap.board ? JSON.parse(JSON.stringify(snap.board)) : null;
+    chessState = snap.chessState ? JSON.parse(JSON.stringify(snap.chessState)) : null;
+  } else if (snap.gameType === 'xiangqi') {
+    xiangqiBoardData = snap.board ? JSON.parse(JSON.stringify(snap.board)) : null;
+    xiangqiState = snap.xiangqiState ? JSON.parse(JSON.stringify(snap.xiangqiState)) : null;
+  } else {
+    boardData = snap.board ? JSON.parse(JSON.stringify(snap.board)) : null;
+  }
+  lastMove = snap.lastMove ? JSON.parse(JSON.stringify(snap.lastMove)) : null;
+  checkColor = snap.checkColor || null;
+  currentTurn = snap.currentTurn;
+}
+
+function updateReviewControls() {
+  const total = moveHistory.length;
+  const stepEl = document.getElementById('reviewStep');
+  if (stepEl) stepEl.textContent = (total > 0 ? (replayIndex) : 0) + ' / ' + Math.max(0, total - 1);
+  const atStart = replayIndex <= 0;
+  const atEnd = replayIndex >= total - 1;
+  const set = (id, disabled) => { const el = document.getElementById(id); if (el) el.disabled = disabled; };
+  set('reviewStartBtn', atStart);
+  set('reviewPrevBtn', atStart);
+  set('reviewNextBtn', atEnd);
+  set('reviewEndBtn', atEnd);
+}
+
 function updateStatus(msg) {
   document.getElementById('playerStatus').style.display = 'flex';
   var players = msg.players;
@@ -1606,6 +1757,10 @@ function connect() {
         rematchRole = null;
         gameOver = false;
         draw = false;
+        // 新一局/重连开始：清空复盘记录与状态
+        moveHistory = [];
+        replaying = false;
+        exitReviewUI();
         hideAllModals();
         setRematchSelectDefaults();
         setStatus('');
@@ -1640,6 +1795,15 @@ function connect() {
         gameOver = msg.gameOver;
         draw = !!msg.draw;
         checkColor = null;
+        // 记录快照：开局（moveHistory 为空时）或终局（gameOver 且与上一步不同）
+        if (!replaying) {
+          if (moveHistory.length === 0) {
+            moveHistory.push(snapshotState());
+          } else if (gameOver) {
+            const lastSnap = moveHistory[moveHistory.length - 1];
+            if (!boardsEqual(lastSnap.board, msg.board)) moveHistory.push(snapshotState());
+          }
+        }
         renderBoard();
         updateHeader();
         if (!gameOver && myColor) {
@@ -1686,6 +1850,8 @@ function connect() {
         chessLegalMoves = [];
         xiangqiSelected = null;
         xiangqiLegalMoves = [];
+        // 记录本步走完后的棋盘快照（开局状态由 sync 首次记录，此处记录每一步）
+        if (!replaying && !gameOver) moveHistory.push(snapshotState());
         renderBoard();
         updateHeader();
         if (!gameOver && myColor) {
