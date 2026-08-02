@@ -105,8 +105,14 @@ body {
 .game-area { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 0 8px 8px; }
 
 /* 聊天面板 */
-.chat-panel { flex-shrink: 0; display: flex; flex-direction: column; background: linear-gradient(180deg, rgba(28,34,56,0.95), rgba(19,24,41,0.85)); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; height: 170px; }
-.chat-header { flex-shrink: 0; padding: 6px 12px; font-size: 12px; font-weight: 600; color: var(--text-dim); letter-spacing: 0.5px; border-bottom: 1px solid var(--border); background: rgba(10,13,26,0.4); display: flex; align-items: center; gap: 8px; }
+.chat-panel { flex-shrink: 0; display: flex; flex-direction: column; background: linear-gradient(180deg, rgba(28,34,56,0.95), rgba(19,24,41,0.85)); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; height: 170px; transition: height 0.2s ease; }
+.chat-panel.collapsed { height: auto; }
+.chat-panel.collapsed .chat-body { display: none; }
+.chat-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.chat-header { flex-shrink: 0; padding: 6px 12px; font-size: 12px; font-weight: 600; color: var(--text-dim); letter-spacing: 0.5px; border-bottom: 1px solid var(--border); background: rgba(10,13,26,0.4); display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+.chat-panel.collapsed .chat-header { border-bottom: none; }
+.chat-toggle { display: inline-block; transition: transform 0.2s ease; font-size: 10px; color: var(--text-dim); width: 12px; text-align: center; }
+.chat-panel.collapsed .chat-toggle { transform: rotate(-90deg); }
 .chat-badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--bad); color: #fff; font-size: 11px; line-height: 18px; text-align: center; font-weight: 700; }
 .chat-badge.hidden { display: none; }
 .chat-peer-status { margin-left: auto; font-size: 11px; font-weight: 500; color: var(--text-dim); display: flex; align-items: center; gap: 5px; }
@@ -303,17 +309,20 @@ body {
       <button class="btn btn-secondary" id="drawBtn" onclick="sendDrawOffer()">求和</button>
     </div>
   </div>
-  <aside class="chat-panel">
-    <div class="chat-header">
+  <aside class="chat-panel" id="chatPanel">
+    <div class="chat-header" id="chatHeader">
+      <span class="chat-toggle" id="chatToggle">▼</span>
       <span>聊天室</span>
       <span class="chat-badge hidden" id="chatBadge">0</span>
       <span class="chat-peer-status" id="chatPeerStatus"></span>
     </div>
+    <div class="chat-body" id="chatBody">
     <div class="chat-messages" id="chatMessages"></div>
     <form class="chat-input-row" id="chatForm">
       <input type="text" id="chatInput" placeholder="输入消息..." autocomplete="off" maxlength="500">
       <button type="submit" class="btn chat-send-btn">发送</button>
     </form>
+    </div>
   </aside>
 </div>
 
@@ -940,16 +949,18 @@ let myKeyPair = null;
 let sharedSecretKey = null;
 let peerKeyBase64 = null;
 let pendingChatQueue = [];
+// 待解密消息队列：密钥尚未建立时收到的密文暂存，密钥建立后批量解密
+let pendingDecryptQueue = [];
 // 聊天记录持久化：重连/刷新后从数组重建 DOM，避免消息丢失
 let chatHistory = [];
 let chatUnread = 0;
 let chatFocused = true;
 const CHAT_STORAGE_KEY = 'chatHistory_' + (new URLSearchParams(location.search).get('room') || '');
 
-// 从 sessionStorage 恢复聊天记录（页面刷新后仍保留，关闭标签页则清除）
+// 从 localStorage 恢复聊天记录（页面刷新/关闭标签页后仍保留，跨会话持久化）
 function loadChatHistory() {
   try {
-    const raw = sessionStorage.getItem(CHAT_STORAGE_KEY);
+    const raw = localStorage.getItem(CHAT_STORAGE_KEY);
     if (raw) chatHistory = JSON.parse(raw) || [];
   } catch (e) { chatHistory = []; }
 }
@@ -958,7 +969,7 @@ function saveChatHistory() {
   try {
     // 仅保留最近 50 条，避免存储膨胀
     const trimmed = chatHistory.slice(-50);
-    sessionStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(trimmed));
+    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(trimmed));
   } catch (e) {}
 }
 
@@ -1755,6 +1766,14 @@ function connect() {
       case 'opponentRejoin':
         setStatus('');
         setPeerOnline(true);
+        // 对方重连后旧共享密钥已失效（对方重新生成了密钥对）。
+        // 必须立即置空 sharedSecretKey，避免我方用旧密钥加密导致对方无法解密。
+        // 新密钥在公钥重新交换后由 onPeerPubKey 重新派生；期间消息暂存 pendingChatQueue。
+        if (sharedSecretKey) {
+          sharedSecretKey = null;
+          peerKeyBase64 = null;
+          initEncryption();
+        }
         break;
 
       case 'waitNotice':
@@ -1783,9 +1802,14 @@ function connect() {
         break;
 
       case 'chat': {
-        // E2E 加密消息：解密后显示；不支持加密或解密失败时回退明文
+        // E2E 加密消息：解密后显示；密钥未建立时暂存，建立后批量解密
         (async () => {
           if (msg.ct && msg.iv && window.crypto && crypto.subtle) {
+            if (!sharedSecretKey) {
+              // 密钥尚未建立（重连/刷新后公钥交换未完成），暂存待解密
+              if (pendingDecryptQueue.length < 50) pendingDecryptQueue.push(msg);
+              return;
+            }
             const plain = await decryptChat(msg.iv, msg.ct);
             if (plain !== null) appendChatMessage(msg.color, plain, msg.ts);
             else appendSystemMessage('收到无法解密的消息');
@@ -1971,6 +1995,7 @@ async function initEncryption() {
   // 重连时重置：旧共享密钥已失效，需用新公钥重新协商
   sharedSecretKey = null;
   peerKeyBase64 = null;
+  pendingDecryptQueue = [];
   if (!window.crypto || !crypto.subtle) return;
   try {
     myKeyPair = await crypto.subtle.generateKey(
@@ -2008,6 +2033,12 @@ async function onPeerPubKey(newKeyBase64) {
     while (pendingChatQueue.length && sharedSecretKey) {
       const text = pendingChatQueue.shift();
       await sendChatEncrypted(text, true);
+    }
+    // 解密通道建立前暂存的消息（重连/刷新后公钥交换完成前的来消息）
+    while (pendingDecryptQueue.length && sharedSecretKey) {
+      const m = pendingDecryptQueue.shift();
+      const plain = await decryptChat(m.iv, m.ct);
+      if (plain !== null) appendChatMessage(m.color, plain, m.ts);
     }
   } catch (e) {
     sharedSecretKey = null;
@@ -2067,6 +2098,8 @@ function setupChat() {
   const form = document.getElementById('chatForm');
   const input = document.getElementById('chatInput');
   const box = document.getElementById('chatMessages');
+  const header = document.getElementById('chatHeader');
+  const panel = document.getElementById('chatPanel');
 
   form.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -2075,6 +2108,17 @@ function setupChat() {
     input.value = '';
     input.focus();
     sendChatEncrypted(text.slice(0, 500));
+  });
+
+  // 点击聊天头部折叠/展开
+  header.addEventListener('click', () => {
+    const collapsed = panel.classList.toggle('collapsed');
+    if (!collapsed) {
+      // 展开时视为已读，清除未读红点并滚动到底部
+      if (chatUnread > 0) { chatUnread = 0; updateChatBadge(); }
+      chatFocused = true;
+      box.scrollTop = box.scrollHeight;
+    }
   });
 
   // 输入框/消息区获得焦点时视为已读，清除未读红点
@@ -2148,7 +2192,10 @@ function appendSystemMessage(text) {
 }
 
 function incrementUnread() {
-  if (chatFocused && document.hasFocus && document.hasFocus()) return;
+  // 折叠状态或窗口未聚焦时计入未读
+  const panel = document.getElementById('chatPanel');
+  const collapsed = panel && panel.classList.contains('collapsed');
+  if (!collapsed && chatFocused && document.hasFocus && document.hasFocus()) return;
   chatUnread++;
   updateChatBadge();
 }
