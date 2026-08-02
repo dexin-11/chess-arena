@@ -1593,6 +1593,7 @@ function exitReview() {
 function exitReviewUI() {
   const bar = document.getElementById('reviewBar');
   if (bar) bar.classList.add('hidden');
+  hideRematchNotice();
 }
 
 function reviewStep(delta) {
@@ -1898,15 +1899,23 @@ function connect() {
         rematchRole = 'accepter';
         document.getElementById('rematchWaiting').classList.add('hidden');
         const gameName = msg.gameType === 'chess' ? '国际象棋' : (msg.gameType === 'xiangqi' ? '中国象棋' : '五子棋');
-        document.getElementById('rematchModalText').textContent = '对方申请在下一盘' + gameName;
-        document.getElementById('rematchModal').classList.remove('hidden');
+        const rematchText = '对方申请再下一盘' + gameName;
+        // 复盘模式下用顶部弹窗提醒，避免全屏遮罩打断复盘；其他场景沿用全屏弹窗
+        if (replaying) {
+          showRematchNotice(rematchText);
+        } else {
+          document.getElementById('rematchModalText').textContent = rematchText;
+          document.getElementById('rematchModal').classList.remove('hidden');
+        }
         break;
 
       case 'rematchDecline':
         document.getElementById('rematchWaiting').classList.add('hidden');
         document.getElementById('rematchModal').classList.add('hidden');
+        hideRematchNotice();
         rematchRole = null;
-        document.getElementById('resultOverlay').classList.remove('hidden');
+        // 复盘模式下保持复盘界面，仅顶部提示；否则回到结果弹窗
+        if (!replaying) document.getElementById('resultOverlay').classList.remove('hidden');
         setStatus('对方拒绝了再来一局');
         break;
 
@@ -1914,8 +1923,9 @@ function connect() {
         // 双方几乎同时点 request 且选了不同棋种：双方都回到结果弹窗重新发起
         document.getElementById('rematchWaiting').classList.add('hidden');
         document.getElementById('rematchModal').classList.add('hidden');
+        hideRematchNotice();
         rematchRole = null;
-        document.getElementById('resultOverlay').classList.remove('hidden');
+        if (!replaying) document.getElementById('resultOverlay').classList.remove('hidden');
         document.getElementById('rematchHint').textContent = '双方选择不一致，请重新发起';
         break;
 
@@ -2020,7 +2030,8 @@ function acceptRematch() {
     // 被请求方无需选择棋种，服务端会采用请求方已选的棋种
     ws.send(JSON.stringify({ type: 'rematchAccept' }));
     document.getElementById('rematchModal').classList.add('hidden');
-    // 被请求方同意后等待服务端重启游戏（或发送 rematchMismatch）
+    hideRematchNotice();
+    // 被请求方同意后等待服务端重启游戏（colorAssign 会清理复盘状态与 UI）
   }
 }
 
@@ -2028,7 +2039,9 @@ function declineRematch() {
   if (ws && ws.readyState === 1) {
     ws.send(JSON.stringify({ type: 'rematchDecline' }));
     document.getElementById('rematchModal').classList.add('hidden');
-    document.getElementById('resultOverlay').classList.remove('hidden');
+    hideRematchNotice();
+    // 复盘模式下保持复盘界面；否则回到结果弹窗
+    if (!replaying) document.getElementById('resultOverlay').classList.remove('hidden');
     rematchRole = null;
   }
 }
@@ -2086,6 +2099,35 @@ function showWaitNotice(text) {
   el.appendChild(span);
   el.appendChild(btn);
   document.body.appendChild(el);
+}
+
+// 复盘模式下的重赛请求顶部弹窗（非全屏，不遮挡复盘界面）
+function showRematchNotice(text) {
+  hideRematchNotice();
+  var el = document.createElement('div');
+  el.id = 'rematchNoticeOverlay';
+  el.className = 'wait-notice-overlay';
+  var span = document.createElement('span');
+  span.textContent = text;
+  var acceptBtn = document.createElement('button');
+  acceptBtn.className = 'ack-btn';
+  acceptBtn.textContent = '同意';
+  acceptBtn.onclick = function() { acceptRematch(); };
+  var declineBtn = document.createElement('button');
+  declineBtn.className = 'ack-btn';
+  declineBtn.style.background = '#2a3458';
+  declineBtn.style.color = '#fff';
+  declineBtn.textContent = '拒绝';
+  declineBtn.onclick = function() { declineRematch(); };
+  el.appendChild(span);
+  el.appendChild(acceptBtn);
+  el.appendChild(declineBtn);
+  document.body.appendChild(el);
+}
+
+function hideRematchNotice() {
+  var el = document.getElementById('rematchNoticeOverlay');
+  if (el) el.remove();
 }
 
 // === 求和（和棋请求） ===
