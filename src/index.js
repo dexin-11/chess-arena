@@ -1003,6 +1003,7 @@ let replayIndex = 0;
 let simMode = false;
 let simColor = null; // 模拟重下下一手颜色（gomoku: black/white）
 let simMoves = []; // 模拟新增的走子记录（gomoku: {r,c,color}），退出时丢弃
+let simWinner = null; // 模拟重下胜方（'black'/'white'），null=未分胜负
 var waitAckReceived = false;
 // 端到端加密状态（ECDH P-256 + AES-GCM）
 let myKeyPair = null;
@@ -1746,8 +1747,10 @@ function enterSimMode() {
   if (!snap) return;
   simMode = true;
   simMoves = [];
+  simWinner = null;
   // 五子棋 currentTurn 为 black/white；开局快照 currentTurn=black
   simColor = snap.currentTurn || 'black';
+  clearCaptureNotice();
   document.getElementById('board').classList.add('sim-active');
   updateReviewControls();
   setStatus('模拟重下中：点击棋盘轮流落子，再点「模拟重下」退出');
@@ -1757,20 +1760,57 @@ function exitSimMode() {
   if (!simMode) return;
   simMode = false;
   simMoves = [];
+  simWinner = null;
   simColor = null;
   document.getElementById('board').classList.remove('sim-active');
+  clearCaptureNotice();
   // 恢复到当前复盘快照
   applyReviewSnapshot();
+}
+
+// 模拟重下五子棋胜负判定：检测 (r,c) 落子后是否五子连珠
+function checkSimWin(r, c, color) {
+  const dirs = [[1, 0], [0, 1], [1, 1], [1, -1]];
+  for (const [dr, dc] of dirs) {
+    let count = 1;
+    for (let i = 1; i < 5; i++) {
+      const nr = r + dr * i, nc = c + dc * i;
+      if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && boardData[nr][nc] === color) count++;
+      else break;
+    }
+    for (let i = 1; i < 5; i++) {
+      const nr = r - dr * i, nc = c - dc * i;
+      if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && boardData[nr][nc] === color) count++;
+      else break;
+    }
+    if (count >= 5) return true;
+  }
+  return false;
+}
+
+// 模拟重下胜负提示：在棋盘顶部红字显示胜方（复用 captureNotice 预留位置）
+function showSimResult(winner) {
+  const el = document.getElementById('captureNotice');
+  if (!el) return;
+  el.textContent = winner === 'black' ? '黑方赢了' : '白方赢了';
 }
 
 // 复盘+模拟重下模式下的棋盘点击处理（替代正常走子流程）
 function onSimCellClick(r, c) {
   if (!simMode || gameType !== 'gomoku') return;
+  if (simWinner) return; // 已分胜负，停止落子
   if (boardData[r] && boardData[r][c]) return; // 已有棋子
   boardData[r][c] = simColor;
   simMoves.push({ r, c, color: simColor });
   lastMove = { from: { r, c }, to: { r, c } };
-  simColor = simColor === 'black' ? 'white' : 'black';
+  // 胜负判定：五子连珠则结束模拟对局
+  if (checkSimWin(r, c, simColor)) {
+    simWinner = simColor;
+    showSimResult(simWinner);
+    setStatus((simColor === 'black' ? '黑方' : '白方') + '赢了（模拟重下），点「模拟重下」退出');
+  } else {
+    simColor = simColor === 'black' ? 'white' : 'black';
+  }
   renderGomoku();
   updateReviewControls();
 }
@@ -1800,6 +1840,7 @@ function exportReviewHTML() {
       lastMove: simMoves.length > 0 ? { from: { r: simMoves[simMoves.length-1].r, c: simMoves[simMoves.length-1].c }, to: { r: simMoves[simMoves.length-1].r, c: simMoves[simMoves.length-1].c } } : last.lastMove,
       checkColor: null,
       currentTurn: simColor,
+      simWinner: simWinner || null, // 模拟重下已分胜负时携带胜方，导出文件加载即显示
     });
   }
   const gameLabel = snaps[0].gameType === 'chess' ? '国际象棋' : (snaps[0].gameType === 'xiangqi' ? '中国象棋' : '五子棋');
@@ -1859,12 +1900,14 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
     '.controls .sim-hint { font-size: 12px; color: #4ecca3; font-weight: 600; }',
     '.controls .sim-hint.hidden { display: none; }',
     '.board-wrap.sim-active { box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 3px #4ecca3; }',
-    '.cell.sim-cell { cursor: pointer; }'
+    '.cell.sim-cell { cursor: pointer; }',
+    '.sim-result { min-height: 22px; text-align: center; font-size: 14px; font-weight: 700; color: #ff4444; margin-bottom: 8px; display: flex; align-items: center; justify-content: center; }'
   ].join(N);
   var js = [
     'var simMode = false;',
     'var simMoves = [];',
     'var simColor = "black";',
+    'var simWinner = null;',
     'function curBoard() {',
     '  var s = SNAPS[idx];',
     '  if (!simMode || simMoves.length === 0) return s.board;',
@@ -1877,6 +1920,23 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
     '  var last = simMoves[simMoves.length - 1];',
     '  return { from: { r: last.r, c: last.c }, to: { r: last.r, c: last.c } };',
     '}',
+    'function checkSimWin(b, r, c, color) {',
+    '  var dirs = [[1,0],[0,1],[1,1],[1,-1]];',
+    '  for (var i = 0; i < dirs.length; i++) {',
+    '    var dr = dirs[i][0], dc = dirs[i][1];',
+    '    var count = 1;',
+    '    for (var j = 1; j < 5; j++) {',
+    '      var nr = r + dr*j, nc = c + dc*j;',
+    '      if (nr >= 0 && nr < 15 && nc >= 0 && nc < 15 && b[nr][nc] === color) count++; else break;',
+    '    }',
+    '    for (var j = 1; j < 5; j++) {',
+    '      var nr2 = r - dr*j, nc2 = c - dc*j;',
+    '      if (nr2 >= 0 && nr2 < 15 && nc2 >= 0 && nc2 < 15 && b[nr2][nc2] === color) count++; else break;',
+    '    }',
+    '    if (count >= 5) return true;',
+    '  }',
+    '  return false;',
+    '}',
     'function toggleSim() {',
     '  if (simMode) exitSim(); else enterSim();',
     '}',
@@ -1885,6 +1945,7 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
     '  if (s.gameType !== "gomoku") { alert("模拟重下仅支持五子棋"); return; }',
     '  simMode = true;',
     '  simMoves = [];',
+    '  simWinner = null;',
     '  simColor = s.currentTurn || "black";',
     '  render();',
     '}',
@@ -1892,6 +1953,7 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
     '  if (!simMode) return;',
     '  simMode = false;',
     '  simMoves = [];',
+    '  simWinner = null;',
     '  render();',
     '}',
     'function onCellClick(r, c) {',
@@ -1899,10 +1961,16 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
     '  if (s.gameType !== "gomoku") return;',
     '  if (!simMode) enterSim();',
     '  if (!simMode) return;',
+    '  if (simWinner) return;',
     '  var b = curBoard();',
     '  if (!b[r] || b[r][c]) return;',
     '  simMoves.push({ r: r, c: c, color: simColor });',
-    '  simColor = simColor === "black" ? "white" : "black";',
+    '  var newB = curBoard();',
+    '  if (checkSimWin(newB, r, c, simColor)) {',
+    '    simWinner = simColor;',
+    '  } else {',
+    '    simColor = simColor === "black" ? "white" : "black";',
+    '  }',
     '  render();',
     '}',
     'function render() {',
@@ -1978,6 +2046,14 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
     '  if (simBtn) simBtn.classList.toggle("active", simMode);',
     '  var simHint = document.getElementById("simHint");',
     '  if (simHint) simHint.classList.toggle("hidden", !simMode);',
+    '  var resEl = document.getElementById("simResult");',
+    '  if (resEl) {',
+    '    var win = null;',
+    '    if (simMode && simWinner) win = simWinner;',
+    '    else if (!simMode && s.simWinner) win = s.simWinner;',
+    '    if (win) resEl.textContent = win === "black" ? "黑方赢了" : "白方赢了";',
+    '    else resEl.textContent = "";',
+    '  }',
     '}',
     'function step(d) { if (simMode) exitSim(); var n = idx + d; if (n < 0) n = 0; if (n > SNAPS.length - 1) n = SNAPS.length - 1; idx = n; render(); }',
     'function goto(t) { if (simMode) exitSim(); idx = t < 0 ? SNAPS.length - 1 : Math.min(t, SNAPS.length - 1); render(); }',
@@ -1996,6 +2072,7 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
     + '<meta name="viewport" content="width=device-width, initial-scale=1.0">' + N
     + '<title>复盘 - __GAME_LABEL__</title>' + N + '<style>' + N + css + N + '</style>' + N + '</head>' + N + '<body>' + N
     + '<h1>复盘 - __GAME_LABEL__</h1>' + N
+    + '<div class="sim-result" id="simResult"></div>' + N
     + '<div class="board-wrap" id="board"></div>' + N
     + '<div class="controls">' + N
     + '  <button id="startBtn" onclick="goto(0)" title="开局">⏮</button>' + N
