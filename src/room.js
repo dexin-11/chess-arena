@@ -21,6 +21,7 @@ export class Room {
     this.whitePlayer = null;
     this.nextId = 0;
     this.rematchVotes = new Map(); // wsId -> gameType
+    this.drawOffered = null; // 当前求和发起方 wsId，null 表示无未处理求和
   }
 
   async fetch(request) {
@@ -111,6 +112,16 @@ export class Room {
         });
         this.broadcastSync();
         this.broadcastStatus(true);
+
+        // 终局重连：补发 gameOver 事件，让重连方恢复结果弹窗
+        // （sync 仅同步棋盘与 gameOver 标志，但不触发结果弹窗显示）
+        if (this.gameOver) {
+          this.sendMessage(conn.ws, {
+            type: 'gameOver',
+            winner: this.winner,
+            draw: this.draw,
+          });
+        }
 
         // 通知对方重连
         for (const [id, c] of this.connections) {
@@ -224,17 +235,33 @@ export class Room {
         break;
 
       case 'drawOffer': {
-        // 求和请求：仅转发给对方。服务端不裁决，由双方客户端确认。
+        // 求和请求：仅在非结束状态且无未处理求和时接受。
+        // 双方几乎同时发起时，先到者为请求方，后到者视为同意 → 直接判和。
         if (this.gameOver) return;
-        for (const [id, c] of this.connections) {
-          if (id !== wsId) this.sendMessage(c.ws, { type: 'drawOffer', color: conn.color });
+        if (this.drawOffered !== null && this.drawOffered !== wsId) {
+          // 对方已发起求和，本次视为同意
+          this.drawOffered = null;
+          this.gameOver = true;
+          this.winner = null;
+          this.draw = true;
+          this.broadcast({ type: 'gameOver', winner: null, draw: true });
+          this.broadcastSync();
+        } else if (this.drawOffered === null) {
+          // 首次求和：记录发起方并转发给对方
+          this.drawOffered = wsId;
+          for (const [id, c] of this.connections) {
+            if (id !== wsId) this.sendMessage(c.ws, { type: 'drawOffer', color: conn.color });
+          }
         }
+        // drawOffered === wsId：重复请求，忽略
         break;
       }
 
       case 'drawAccept': {
-        // 对方同意求和：判和棋并广播终局
+        // 同意求和：仅当对方已发起求和时生效，防止任意玩家强制和棋
         if (this.gameOver) return;
+        if (this.drawOffered === null || this.drawOffered === wsId) return;
+        this.drawOffered = null;
         this.gameOver = true;
         this.winner = null;
         this.draw = true;
@@ -244,7 +271,8 @@ export class Room {
       }
 
       case 'drawDecline': {
-        // 拒绝求和：仅通知发起方
+        // 拒绝/取消求和：清除求和状态并通知对方
+        this.drawOffered = null;
         for (const [id, c] of this.connections) {
           if (id !== wsId) this.sendMessage(c.ws, { type: 'drawDecline' });
         }
@@ -342,7 +370,11 @@ export class Room {
     }
     if (!matched) return;
 
-    const promotionPiece = matched.special === 'promotion' ? (msg.promotionPiece || 'q') : undefined;
+    // 校验升变棋子类型，防止恶意客户端构造非法棋子（如升变为王导致双王）
+    const VALID_PROMOTIONS = ['q', 'r', 'b', 'n'];
+    const promotionPiece = matched.special === 'promotion'
+      ? (VALID_PROMOTIONS.includes(msg.promotionPiece) ? msg.promotionPiece : 'q')
+      : undefined;
     const result = Chess.applyMove(this.chessBoard, matched, this.chessState, promotionPiece);
     this.chessBoard = result.board;
     this.chessState = result.newState;
@@ -469,9 +501,11 @@ export class Room {
 
     this.connections.delete(wsId);
     this.rematchVotes.delete(wsId);
+    // 断线时清除未处理求和，避免恢复后残留
+    this.drawOffered = null;
 
     if (this.connections.size === 0) {
-      this.state.abort();
+      // 双方均断开：DO 在空闲后由运行时自动回收，无需显式终止
       return;
     }
 
@@ -574,6 +608,7 @@ export class Room {
     this.draw = false;
     this.lastMove = null;
     this.rematchVotes.clear();
+    this.drawOffered = null;
 
     this.assignColors();
   }

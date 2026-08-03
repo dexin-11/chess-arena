@@ -1000,6 +1000,8 @@ let pendingDecryptQueue = [];
 let chatHistory = [];
 let chatUnread = 0;
 let chatFocused = true;
+// 是否允许断线重连：roomFull 等场景需禁用，避免无限重连循环
+let shouldReconnect = true;
 const CHAT_STORAGE_KEY = 'chatHistory_' + (new URLSearchParams(location.search).get('room') || '');
 
 // 从 localStorage 恢复聊天记录（页面刷新/关闭标签页后仍保留，跨会话持久化）
@@ -1952,6 +1954,8 @@ function hideAllModals() {
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(proto + '://' + location.host + '/ws?room=' + roomId + '&game=' + gameType);
+  // 新连接默认允许重连（roomFull 等场景会显式置 false）
+  shouldReconnect = true;
 
   // 客户端每 3 秒发起 ping 测量延迟
   var pingTimer = null;
@@ -2180,6 +2184,8 @@ function connect() {
         break;
 
       case 'roomFull':
+        // 房间已满：禁用重连，避免无限循环
+        shouldReconnect = false;
         setStatus('房间已满，请创建新游戏');
         ws.close();
         break;
@@ -2254,10 +2260,12 @@ function connect() {
 
   ws.onclose = () => {
     if (pingTimer) clearInterval(pingTimer);
-    if (!gameOver) setStatus('连接断开，正在重连...');
-    setTimeout(() => {
-      if (!gameOver) connect();
-    }, 2000);
+    if (shouldReconnect && !gameOver) {
+      setStatus('连接断开，正在重连...');
+      setTimeout(() => {
+        if (shouldReconnect && !gameOver) connect();
+      }, 2000);
+    }
   };
 
   ws.onerror = () => {};
