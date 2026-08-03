@@ -138,6 +138,11 @@ body {
 .status-msg.check-msg { color: var(--bad); font-weight: 700; font-size: 14px; animation: checkPulse 1s ease-in-out infinite; }
 @keyframes checkPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
 
+/* 吃子提示：固定高度预留位置，防止显示时棋盘缩放 */
+.capture-notice { min-height: 22px; text-align: center; font-size: 13px; font-weight: 700; color: #ff4444; flex-shrink: 0; display: flex; align-items: center; justify-content: center; gap: 4px; }
+.capture-notice:empty { min-height: 22px; }
+.capture-notice .capture-glyph { font-size: 18px; line-height: 1; }
+
 .board { position: relative; background: var(--board-wood); border-radius: 8px; padding: clamp(6px, 1.6vmin, 14px); box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.15); width: var(--board-size); height: var(--board-size); max-width: 100%; flex-shrink: 1; min-width: 0; }
 .board.chess { background: transparent; padding: 0; overflow: hidden; border-radius: 6px; box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.4); }
 /* 模拟重下模式：棋盘绿色描边高亮 */
@@ -171,6 +176,7 @@ body {
 .chess-cell.selected { box-shadow: inset 0 0 0 min(0.4vmin, 4px) var(--accent); }
 .chess-cell.last-move { box-shadow: inset 0 0 0 min(0.4vmin, 4px) rgba(255, 213, 79, 0.85); }
 .chess-cell.check-king { box-shadow: inset 0 0 0 min(0.4vmin, 4px) #ff3333; background: #ff6666 !important; }
+.chess-cell.castle-hint { box-shadow: inset 0 0 0 min(0.5vmin, 5px) #4ecca3; cursor: pointer; }
 .chess-cell .move-dot { position: absolute; width: 32%; height: 32%; border-radius: 50%; background: rgba(0,0,0,0.28); pointer-events: none; z-index: 1; }
 .chess-cell .capture-ring { position: absolute; inset: 6%; border: min(0.4vmin, 4px) solid rgba(0,0,0,0.32); border-radius: 50%; box-sizing: border-box; pointer-events: none; z-index: 1; }
 .chess-cell .coord { position: absolute; font-size: min(1.6vmin, 10px); font-family: 'JetBrains Mono', monospace; font-weight: 700; pointer-events: none; }
@@ -281,6 +287,9 @@ body {
   .chat-panel { height: 150px; }
   .chat-messages { font-size: 12px; }
   .chat-input-row input { font-size: 12px; padding: 6px 8px; }
+  /* 手机端复盘/再下一盘弹窗加宽，防止文字与按钮挤在一起 */
+  .wait-notice-overlay { left: 4vw; right: 4vw; transform: none; width: 92vw; max-width: 92vw; flex-wrap: wrap; justify-content: center; gap: 8px 10px; padding: 10px 14px; font-size: 13px; }
+  .wait-notice-overlay .ack-btn { padding: 6px 16px; font-size: 13px; }
 }
 /* 横屏手机：屏幕宽而矮，聊天改到侧面（窄面板）以免棋盘过小 */
 @media (orientation: landscape) and (max-height: 500px) {
@@ -323,6 +332,7 @@ body {
 <div class="game-area">
   <div class="board-container">
     <div class="status-msg" id="statusMsg"></div>
+    <div class="capture-notice" id="captureNotice"></div>
     <div class="board" id="board"></div>
     <div class="button-row">
       <button class="btn" id="copyBtn" onclick="copyLink()">复制链接邀请好友</button>
@@ -958,6 +968,9 @@ const XIANGQI_GLYPHS = {
   red:   { k:'帅', a:'仕', e:'相', h:'马', r:'车', c:'炮', p:'兵' },
   black: { k:'将', a:'士', e:'象', h:'马', r:'车', c:'炮', p:'卒' }
 };
+// 吃子提示用的棋子中文名
+const CHESS_PIECE_NAMES = { k:'王', q:'后', r:'车', b:'象', n:'马', p:'兵' };
+const XIANGQI_PIECE_NAMES = { k:'将帅', a:'士', e:'象', h:'马', r:'车', c:'炮', p:'兵卒' };
 
 let gameType = 'gomoku';
 let myColor = null;
@@ -1195,6 +1208,13 @@ function renderChess() {
         }
       }
 
+      // 王车易位：选中王时，在可参与易位的车上显示绿色高亮提示
+      if (chessSelected && piece && piece.type === 'r' && piece.color === myColor) {
+        const hasKingside = chessLegalMoves.some(m => m.special === 'castle-kingside' && r === chessSelected.r && c === 7);
+        const hasQueenside = chessLegalMoves.some(m => m.special === 'castle-queenside' && r === chessSelected.r && c === 0);
+        if (hasKingside || hasQueenside) cell.classList.add('castle-hint');
+      }
+
       // 坐标标签
       if (c === leftmostCol) {
         const rank = document.createElement('span');
@@ -1232,6 +1252,15 @@ function onChessCellClick(r, c) {
         sendChessMove(move);
       }
       return;
+    }
+    // 王车易位：选中王后点击车也能触发（用户直觉操作）
+    if (chessSelected.r !== undefined && piece && piece.color === myColor && piece.type === 'r') {
+      const castleMove = chessLegalMoves.find(m =>
+        m.special === 'castle-kingside' && r === chessSelected.r && c === 7
+      ) || chessLegalMoves.find(m =>
+        m.special === 'castle-queenside' && r === chessSelected.r && c === 0
+      );
+      if (castleMove) { sendChessMove(castleMove); return; }
     }
   }
 
@@ -1628,6 +1657,7 @@ function exitReviewUI() {
   const board = document.getElementById('board');
   if (board) board.classList.remove('sim-active');
   hideRematchNotice();
+  clearCaptureNotice();
 }
 
 function reviewStep(delta) {
@@ -2019,6 +2049,26 @@ function setStatus(msg, isCheck) {
   if (isCheck) el.classList.add('check-msg'); else el.classList.remove('check-msg');
 }
 
+// 吃子提示：对方吃了我的棋子时，在棋盘顶部红字显示被吃棋子
+function showCaptureNotice(piece, gt) {
+  const el = document.getElementById('captureNotice');
+  if (!el) return;
+  var nameMap = gt === 'xiangqi' ? XIANGQI_PIECE_NAMES : CHESS_PIECE_NAMES;
+  var name = nameMap[piece.type] || piece.type;
+  var glyph = '';
+  if (gt === 'chess' && CHESS_GLYPHS[piece.color]) {
+    glyph = CHESS_GLYPHS[piece.color][piece.type] || '';
+  } else if (gt === 'xiangqi' && XIANGQI_GLYPHS[piece.color]) {
+    glyph = XIANGQI_GLYPHS[piece.color][piece.type] || '';
+  }
+  el.innerHTML = '对方吃了你的 ' + name +
+    (glyph ? ' <span class="capture-glyph">' + glyph + '</span>' : '');
+}
+function clearCaptureNotice() {
+  var el = document.getElementById('captureNotice');
+  if (el) el.innerHTML = '';
+}
+
 function setRematchSelectDefaults() {
   document.getElementById('rematchGameSelect').value = gameType;
   document.getElementById('rematchHint').textContent = '';
@@ -2152,6 +2202,7 @@ function connect() {
 
       case 'moveUpdate': {
         // 增量走子同步：用本地引擎应用走法，避免整盘下发
+        var capturedPiece = null;
         if (msg.gameType && msg.gameType !== gameType) {
           gameType = msg.gameType;
           buildBoard();
@@ -2163,6 +2214,7 @@ function connect() {
             const result = Chess.applyMove(chessBoardData, msg.move, chessState, msg.move && msg.move.promotionPiece);
             chessBoardData = result.board;
             chessState = result.newState;
+            capturedPiece = result.captured;
           } catch (e) {
             // 本地应用失败（引擎同源，理论上不会发生）；以服务端状态为准
           }
@@ -2172,6 +2224,7 @@ function connect() {
             const result = Xiangqi.applyMove(xiangqiBoardData, msg.move, xiangqiState);
             xiangqiBoardData = result.board;
             xiangqiState = result.newState;
+            capturedPiece = result.captured;
           } catch (e) {
             // 本地应用失败，以服务端状态为准
           }
@@ -2188,6 +2241,12 @@ function connect() {
         xiangqiLegalMoves = [];
         // 记录本步走完后的棋盘快照（开局状态由 sync 首次记录，此处记录每一步）
         if (!replaying && !gameOver) moveHistory.push(snapshotState());
+        // 对方吃了我的棋子时，在棋盘顶部红字提示
+        if (capturedPiece && myColor && capturedPiece.color === myColor) {
+          showCaptureNotice(capturedPiece, gameType);
+        } else {
+          clearCaptureNotice();
+        }
         renderBoard();
         updateHeader();
         if (!gameOver && myColor) {
