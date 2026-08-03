@@ -348,7 +348,7 @@ body {
 <div class="waiting-overlay" id="waitingOverlay">
   <div class="spinner"></div>
   <div class="waiting-text">等待好友加入...</div>
-  <button class="btn" onclick="copyLink()">复制链接邀请好友</button>
+  <button class="btn" id="copyBtnWaiting" onclick="copyLink('copyBtnWaiting')">复制链接邀请好友</button>
 </div>
 
 <div class="result-overlay hidden" id="resultOverlay">
@@ -1774,9 +1774,10 @@ function exportReviewHTML() {
 }
 
 // 构建自包含复盘 HTML（含内联 CSS + JS，快照内嵌为 JSON）
-// 注意：本函数位于外层 GAME_HTML 模板字符串内，不能使用模板插值语法，
-// 改用字符串拼接 + 占位符替换，避免外层模板提前求值。
+// 注意：本函数位于外层 GAME_HTML 模板字符串内，不能使用换行转义或模板插值语法，
+// 改用 String.fromCharCode(10) 代替换行、占位符替换避免外层模板提前求值。
 function buildExportHTML(snaps, gameLabel, dataJson) {
+  var N = String.fromCharCode(10);
   var css = [
     '* { margin: 0; padding: 0; box-sizing: border-box; }',
     "body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0d1a; color: #e8ecf4; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 16px; }",
@@ -1806,8 +1807,8 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
     '.controls button { padding: 8px 14px; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; background: #2a3458; color: #fff; font-weight: 600; }',
     '.controls button:hover { background: #3a4578; }',
     '.controls button:disabled { opacity: 0.35; cursor: not-allowed; }',
-    '.controls .step { font-family: monospace; font-weight: 700; min-width: 70px; text-align: center; }',
-  ].join('\n');
+    '.controls .step { font-family: monospace; font-weight: 700; min-width: 70px; text-align: center; }'
+  ].join(N);
   var js = [
     'function render() {',
     '  var s = SNAPS[idx];',
@@ -1875,27 +1876,28 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
     '  else if (e.key === "Home") goto(0);',
     '  else if (e.key === "End") goto(-1);',
     '});',
-    'render();',
-  ].join('\n');
-  // 用占位符避免外层模板字符串插值
-  var html = '<!DOCTYPE html>\n'
-    + '<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n'
-    + '<meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
-    + '<title>复盘 - __GAME_LABEL__</title>\n<style>\n' + css + '\n</style>\n</head>\n<body>\n'
-    + '<h1>复盘 - __GAME_LABEL__</h1>\n'
-    + '<div class="board-wrap" id="board"></div>\n'
-    + '<div class="controls">\n'
-    + '  <button id="startBtn" onclick="goto(0)" title="开局">⏮</button>\n'
-    + '  <button id="prevBtn" onclick="step(-1)" title="上一步">◀</button>\n'
-    + '  <span class="step" id="stepEl">0 / 0</span>\n'
-    + '  <button id="nextBtn" onclick="step(1)" title="下一步">▶</button>\n'
-    + '  <button id="endBtn" onclick="goto(-1)" title="结局">⏭</button>\n'
-    + '</div>\n<script>\n'
-    + 'var SNAPS = __DATA_JSON__;\n'
-    + 'var idx = SNAPS.length - 1;\n'
-    + 'var CHESS = { white:{k:"♔",q:"♕",r:"♖",b:"♗",n:"♘",p:"♙"}, black:{k:"♚",q:"♛",r:"♜",b:"♝",n:"♞",p:"♟"} };\n'
-    + 'var XIANGQI = { red:{k:"帥",a:"仕",e:"相",h:"傌",r:"俥",c:"炮",p:"兵"}, black:{k:"將",a:"士",e:"象",h:"馬",r:"車",c:"炮",p:"卒"} };\n'
-    + js + '\n</script>\n</body>\n</html>';
+    'render();'
+  ].join(N);
+  var SC = '<scr' + 'ipt>';
+  var ESC = '</scr' + 'ipt>';
+  var html = '<!DOCTYPE html>' + N
+    + '<html lang="zh-CN">' + N + '<head>' + N + '<meta charset="UTF-8">' + N
+    + '<meta name="viewport" content="width=device-width, initial-scale=1.0">' + N
+    + '<title>复盘 - __GAME_LABEL__</title>' + N + '<style>' + N + css + N + '</style>' + N + '</head>' + N + '<body>' + N
+    + '<h1>复盘 - __GAME_LABEL__</h1>' + N
+    + '<div class="board-wrap" id="board"></div>' + N
+    + '<div class="controls">' + N
+    + '  <button id="startBtn" onclick="goto(0)" title="开局">⏮</button>' + N
+    + '  <button id="prevBtn" onclick="step(-1)" title="上一步">◀</button>' + N
+    + '  <span class="step" id="stepEl">0 / 0</span>' + N
+    + '  <button id="nextBtn" onclick="step(1)" title="下一步">▶</button>' + N
+    + '  <button id="endBtn" onclick="goto(-1)" title="结局">⏭</button>' + N
+    + '</div>' + N + SC + N
+    + 'var SNAPS = __DATA_JSON__;' + N
+    + 'var idx = SNAPS.length - 1;' + N
+    + 'var CHESS = { white:{k:"♔",q:"♕",r:"♖",b:"♗",n:"♘",p:"♙"}, black:{k:"♚",q:"♛",r:"♜",b:"♝",n:"♞",p:"♟"} };' + N
+    + 'var XIANGQI = { red:{k:"帥",a:"仕",e:"相",h:"傌",r:"俥",c:"炮",p:"兵"}, black:{k:"將",a:"士",e:"象",h:"馬",r:"車",c:"炮",p:"卒"} };' + N
+    + js + N + ESC + N + '</body>' + N + '</html>';
   return html.replace(/__GAME_LABEL__/g, gameLabel).replace(/__DATA_JSON__/g, dataJson);
 }
 
@@ -2409,26 +2411,35 @@ function cancelDraw() {
   document.getElementById('drawWaiting').classList.add('hidden');
 }
 
-function copyLink() {
-  const url = location.href;
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(url).then(() => {
-      document.getElementById('copyBtn').textContent = '已复制!';
-      setTimeout(() => {
-        document.getElementById('copyBtn').textContent = '复制链接邀请好友';
-      }, 2000);
-    });
+function copyLink(btnId) {
+  var url = location.href;
+  var btn = document.getElementById(btnId || 'copyBtn');
+  var showDone = function(ok) {
+    if (!btn) return;
+    btn.textContent = ok ? '已复制!' : '请从地址栏复制';
+    setTimeout(function() { btn.textContent = '复制链接邀请好友'; }, 2000);
+  };
+  var fallback = function() {
+    var ok = false;
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = url;
+      ta.style.position = 'fixed';
+      ta.style.top = '0';
+      ta.style.left = '0';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+    } catch (e) { ok = false; }
+    showDone(ok);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+    navigator.clipboard.writeText(url).then(function() { showDone(true); }).catch(function() { fallback(); });
   } else {
-    const ta = document.createElement('textarea');
-    ta.value = url;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    document.getElementById('copyBtn').textContent = '已复制!';
-    setTimeout(() => {
-      document.getElementById('copyBtn').textContent = '复制链接邀请好友';
-    }, 2000);
+    fallback();
   }
 }
 
