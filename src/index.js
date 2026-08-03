@@ -140,6 +140,8 @@ body {
 
 .board { position: relative; background: var(--board-wood); border-radius: 8px; padding: clamp(6px, 1.6vmin, 14px); box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.15); width: var(--board-size); height: var(--board-size); max-width: 100%; flex-shrink: 1; min-width: 0; }
 .board.chess { background: transparent; padding: 0; overflow: hidden; border-radius: 6px; box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.4); }
+/* 模拟重下模式：棋盘绿色描边高亮 */
+.board.sim-active { box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 3px #4ecca3, inset 0 1px 0 rgba(255,255,255,0.15); }
 
 .board-grid { width: 100%; height: 100%; display: grid; grid-template-columns: repeat(15, 1fr); grid-template-rows: repeat(15, 1fr); gap: 0; }
 .cell { width: 100%; height: 100%; position: relative; cursor: pointer; }
@@ -1115,6 +1117,13 @@ function renderGomoku() {
 }
 
 function onGomokuCellClick(r, c) {
+  // 复盘模式下：点击空格直接进入模拟重下并落子
+  if (replaying && !simMode) {
+    if (!boardData || !boardData[r] || boardData[r][c]) return;
+    enterSimMode();
+    if (simMode) onSimCellClick(r, c);
+    return;
+  }
   // 模拟重下模式：本地轮流落子，不发送到服务端
   if (simMode) { onSimCellClick(r, c); return; }
   if (gameOver || !myColor || myColor !== currentTurn) return;
@@ -1616,6 +1625,8 @@ function exitReview() {
 function exitReviewUI() {
   const bar = document.getElementById('reviewBar');
   if (bar) bar.classList.add('hidden');
+  const board = document.getElementById('board');
+  if (board) board.classList.remove('sim-active');
   hideRematchNotice();
 }
 
@@ -1707,6 +1718,7 @@ function enterSimMode() {
   simMoves = [];
   // 五子棋 currentTurn 为 black/white；开局快照 currentTurn=black
   simColor = snap.currentTurn || 'black';
+  document.getElementById('board').classList.add('sim-active');
   updateReviewControls();
   setStatus('模拟重下中：点击棋盘轮流落子，再点「模拟重下」退出');
 }
@@ -1716,6 +1728,7 @@ function exitSimMode() {
   simMode = false;
   simMoves = [];
   simColor = null;
+  document.getElementById('board').classList.remove('sim-active');
   // 恢复到当前复盘快照
   applyReviewSnapshot();
 }
@@ -1791,7 +1804,7 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
     '.cell { position: relative; cursor: default; }',
     ".cell::before { content: ''; position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: #8B7355; }",
     ".cell::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: #8B7355; }",
-    '.stone { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 82%; height: 82%; border-radius: 50%; }',
+    '.stone { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 82%; height: 82%; border-radius: 50%; z-index: 2; }',
     '.stone.black { background: radial-gradient(circle at 35% 30%, #4a4a4a, #050505 70%); }',
     '.stone.white { background: radial-gradient(circle at 35% 30%, #fff, #b0b0b0 80%); }',
     '.chess-cell { display: flex; align-items: center; justify-content: center; font-size: 7vmin; }',
@@ -1809,14 +1822,66 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
     '.controls button { padding: 8px 14px; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; background: #2a3458; color: #fff; font-weight: 600; }',
     '.controls button:hover { background: #3a4578; }',
     '.controls button:disabled { opacity: 0.35; cursor: not-allowed; }',
-    '.controls .step { font-family: monospace; font-weight: 700; min-width: 70px; text-align: center; }'
+    '.controls .step { font-family: monospace; font-weight: 700; min-width: 70px; text-align: center; }',
+    '.controls .sim-btn { background: #1a6b4e; }',
+    '.controls .sim-btn:hover { background: #248a68; }',
+    '.controls .sim-btn.active { background: #4ecca3; color: #0a0d1a; }',
+    '.controls .sim-hint { font-size: 12px; color: #4ecca3; font-weight: 600; }',
+    '.controls .sim-hint.hidden { display: none; }',
+    '.board-wrap.sim-active { box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 3px #4ecca3; }',
+    '.cell.sim-cell { cursor: pointer; }'
   ].join(N);
   var js = [
+    'var simMode = false;',
+    'var simMoves = [];',
+    'var simColor = "black";',
+    'function curBoard() {',
+    '  var s = SNAPS[idx];',
+    '  if (!simMode || simMoves.length === 0) return s.board;',
+    '  var b = JSON.parse(JSON.stringify(s.board));',
+    '  for (var i = 0; i < simMoves.length; i++) { var m = simMoves[i]; b[m.r][m.c] = m.color; }',
+    '  return b;',
+    '}',
+    'function curLastMove() {',
+    '  if (!simMode || simMoves.length === 0) return SNAPS[idx].lastMove;',
+    '  var last = simMoves[simMoves.length - 1];',
+    '  return { from: { r: last.r, c: last.c }, to: { r: last.r, c: last.c } };',
+    '}',
+    'function toggleSim() {',
+    '  if (simMode) exitSim(); else enterSim();',
+    '}',
+    'function enterSim() {',
+    '  var s = SNAPS[idx];',
+    '  if (s.gameType !== "gomoku") { alert("模拟重下仅支持五子棋"); return; }',
+    '  simMode = true;',
+    '  simMoves = [];',
+    '  simColor = s.currentTurn || "black";',
+    '  render();',
+    '}',
+    'function exitSim() {',
+    '  if (!simMode) return;',
+    '  simMode = false;',
+    '  simMoves = [];',
+    '  render();',
+    '}',
+    'function onCellClick(r, c) {',
+    '  var s = SNAPS[idx];',
+    '  if (s.gameType !== "gomoku") return;',
+    '  if (!simMode) enterSim();',
+    '  if (!simMode) return;',
+    '  var b = curBoard();',
+    '  if (!b[r] || b[r][c]) return;',
+    '  simMoves.push({ r: r, c: c, color: simColor });',
+    '  simColor = simColor === "black" ? "white" : "black";',
+    '  render();',
+    '}',
     'function render() {',
     '  var s = SNAPS[idx];',
-    '  var board = document.getElementById("board");',
-    '  board.className = "board-wrap" + (s.gameType === "chess" ? " chess" : (s.gameType === "xiangqi" ? " xiangqi" : ""));',
-    '  board.innerHTML = "";',
+    '  var boardData = curBoard();',
+    '  var lastMove = curLastMove();',
+    '  var boardEl = document.getElementById("board");',
+    '  boardEl.className = "board-wrap" + (s.gameType === "chess" ? " chess" : (s.gameType === "xiangqi" ? " xiangqi" : "")) + (simMode ? " sim-active" : "");',
+    '  boardEl.innerHTML = "";',
     '  var grid = document.createElement("div");',
     '  grid.className = "grid";',
     '  var rows, cols;',
@@ -1834,9 +1899,11 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
     '      } else if (s.gameType === "xiangqi") {',
     '        cell.className = "xiangqi-cell";',
     '      } else {',
-    '        cell.className = "cell";',
+    '        cell.className = "cell" + (simMode ? " sim-cell" : "");',
     '      }',
-    '      var piece = s.board && s.board[r] ? s.board[r][c] : null;',
+    '      cell.dataset.row = r;',
+    '      cell.dataset.col = c;',
+    '      var piece = boardData && boardData[r] ? boardData[r][c] : null;',
     '      if (piece) {',
     '        if (s.gameType === "gomoku") {',
     '          var st = document.createElement("div");',
@@ -1854,24 +1921,36 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
     '          cell.appendChild(sp2);',
     '        }',
     '      }',
-    '      if (s.lastMove) {',
-    '        if ((s.lastMove.from && s.lastMove.from.r === r && s.lastMove.from.c === c) ||',
-    '            (s.lastMove.to && s.lastMove.to.r === r && s.lastMove.to.c === c)) {',
+    '      if (lastMove) {',
+    '        if ((lastMove.from && lastMove.from.r === r && lastMove.from.c === c) ||',
+    '            (lastMove.to && lastMove.to.r === r && lastMove.to.c === c)) {',
     '          cell.classList.add("last-move");',
     '        }',
     '      }',
     '      grid.appendChild(cell);',
     '    }',
     '  }',
-    '  board.appendChild(grid);',
-    '  document.getElementById("stepEl").textContent = idx + " / " + (SNAPS.length - 1);',
-    '  document.getElementById("startBtn").disabled = idx <= 0;',
-    '  document.getElementById("prevBtn").disabled = idx <= 0;',
-    '  document.getElementById("nextBtn").disabled = idx >= SNAPS.length - 1;',
-    '  document.getElementById("endBtn").disabled = idx >= SNAPS.length - 1;',
+    '  grid.addEventListener("click", function(e) {',
+    '    var node = e.target;',
+    '    while (node && node.parentNode !== grid) node = node.parentNode;',
+    '    if (!node || node.dataset.row === undefined) return;',
+    '    onCellClick(+node.dataset.row, +node.dataset.col);',
+    '  });',
+    '  boardEl.appendChild(grid);',
+    '  var shown = simMode ? (idx + simMoves.length) : idx;',
+    '  var shownTotal = simMode ? (SNAPS.length - 1 + simMoves.length) : Math.max(0, SNAPS.length - 1);',
+    '  document.getElementById("stepEl").textContent = shown + " / " + shownTotal;',
+    '  document.getElementById("startBtn").disabled = simMode || idx <= 0;',
+    '  document.getElementById("prevBtn").disabled = simMode || idx <= 0;',
+    '  document.getElementById("nextBtn").disabled = simMode || idx >= SNAPS.length - 1;',
+    '  document.getElementById("endBtn").disabled = simMode || idx >= SNAPS.length - 1;',
+    '  var simBtn = document.getElementById("simBtn");',
+    '  if (simBtn) simBtn.classList.toggle("active", simMode);',
+    '  var simHint = document.getElementById("simHint");',
+    '  if (simHint) simHint.classList.toggle("hidden", !simMode);',
     '}',
-    'function step(d) { var n = idx + d; if (n < 0) n = 0; if (n > SNAPS.length - 1) n = SNAPS.length - 1; idx = n; render(); }',
-    'function goto(t) { idx = t < 0 ? SNAPS.length - 1 : Math.min(t, SNAPS.length - 1); render(); }',
+    'function step(d) { if (simMode) exitSim(); var n = idx + d; if (n < 0) n = 0; if (n > SNAPS.length - 1) n = SNAPS.length - 1; idx = n; render(); }',
+    'function goto(t) { if (simMode) exitSim(); idx = t < 0 ? SNAPS.length - 1 : Math.min(t, SNAPS.length - 1); render(); }',
     'document.addEventListener("keydown", function(e) {',
     '  if (e.key === "ArrowLeft") step(-1);',
     '  else if (e.key === "ArrowRight") step(1);',
@@ -1894,6 +1973,8 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
     + '  <span class="step" id="stepEl">0 / 0</span>' + N
     + '  <button id="nextBtn" onclick="step(1)" title="下一步">▶</button>' + N
     + '  <button id="endBtn" onclick="goto(-1)" title="结局">⏭</button>' + N
+    + '  <button id="simBtn" class="sim-btn" onclick="toggleSim()" title="模拟重下">模拟重下</button>' + N
+    + '  <span id="simHint" class="sim-hint hidden">模拟重下中：点击棋盘轮流落子</span>' + N
     + '</div>' + N + SC + N
     + 'var SNAPS = __DATA_JSON__;' + N
     + 'var idx = SNAPS.length - 1;' + N
