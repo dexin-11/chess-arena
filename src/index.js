@@ -1807,15 +1807,51 @@ function exportReviewHTML() {
   const html = buildExportHTML(snaps, gameLabel, data);
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
   const ts = new Date();
   const pad = n => String(n).padStart(2, '0');
-  a.download = 'review_' + ts.getFullYear() + pad(ts.getMonth()+1) + pad(ts.getDate()) + '_' + pad(ts.getHours()) + pad(ts.getMinutes()) + '.html';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const filename = 'review_' + ts.getFullYear() + pad(ts.getMonth()+1) + pad(ts.getDate()) + '_' + pad(ts.getHours()) + pad(ts.getMinutes()) + '.html';
+  try {
+    // 方式一：标准 <a download> 触发浏览器下载（普通浏览器/允许下载的内嵌环境均可）
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    // 兜底：页面运行在内嵌 iframe（如 IDE 预览/第三方嵌入）时，浏览器会静默拦截下载，
+    // 此时在新窗口打开导出的复盘文件，用户可直接查看并手动保存
+    if (window.self !== window.top) {
+      const w = window.open('', '_blank');
+      if (w) {
+        w.document.open();
+        w.document.write(html);
+        w.document.close();
+        setStatus('当前为内嵌预览环境，已在新窗口打开复盘文件，请在新窗口中选择「另存为」保存');
+      } else {
+        setStatus('浏览器拦截了导出，请允许弹窗后重新点击导出');
+      }
+    } else {
+      setStatus('已导出复盘文件，请留意浏览器下载记录');
+    }
+  } catch (e) {
+    // 兜底：自动下载未生效时在新窗口打开导出内容，保证用户仍能拿到复盘文件
+    try {
+      const w = window.open('', '_blank');
+      if (w) {
+        w.document.open();
+        w.document.write(html);
+        w.document.close();
+        setStatus('自动下载未成功，已在新窗口打开复盘文件，请手动保存');
+      } else {
+        setStatus('导出失败：浏览器拦截了弹窗，请允许弹窗后重试');
+      }
+    } catch (e2) {
+      setStatus('导出失败：' + (e && e.message ? e.message : '未知错误'));
+    }
+  } finally {
+    // 延迟释放，避免兜底的新窗口尚未加载完成
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  }
 }
 
 // 构建自包含复盘 HTML（含内联 CSS + JS，快照内嵌为 JSON）
