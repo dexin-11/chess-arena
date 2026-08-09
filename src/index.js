@@ -25,6 +25,18 @@ body { font-family: 'Sora', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-
 .home-btn.chess-btn:hover { background: #1a4a8a; }
 .home-btn.xiangqi-btn { background: #8B4513; }
 .home-btn.xiangqi-btn:hover { background: #A0522D; }
+.mode-overlay { position: fixed; inset: 0; background: rgba(5,8,18,0.7); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); display: none; align-items: center; justify-content: center; z-index: 100; }
+.mode-overlay.show { display: flex; }
+.mode-card { background: linear-gradient(180deg, rgba(28,34,56,0.97), rgba(19,24,41,0.9)); border: 1px solid #2a3458; border-radius: 16px; padding: 36px 32px; display: flex; flex-direction: column; align-items: center; gap: 20px; box-shadow: 0 12px 40px rgba(0,0,0,0.7); min-width: 280px; }
+.mode-title { font-size: 22px; font-weight: 700; color: #e94560; letter-spacing: 1px; }
+.mode-buttons { display: flex; flex-direction: column; gap: 14px; width: 100%; }
+.mode-btn { padding: 16px 20px; border: none; border-radius: 10px; font-size: 17px; font-family: 'Sora', sans-serif; cursor: pointer; background: #0f3460; color: #fff; font-weight: 600; transition: background 0.2s, transform 0.15s; letter-spacing: 0.5px; }
+.mode-btn:hover { background: #1a4a8a; }
+.mode-btn:active { transform: scale(0.97); }
+.mode-btn.local-btn { background: #e94560; }
+.mode-btn.local-btn:hover { background: #c73650; }
+.mode-close { background: none; border: none; color: #8892b0; font-size: 14px; cursor: pointer; margin-top: 4px; }
+.mode-close:hover { color: #eee; }
 </style>
 </head>
 <body>
@@ -32,20 +44,44 @@ body { font-family: 'Sora', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-
   <div class="home-title">选择棋种</div>
   <div class="home-subtitle">点击进入对战房间</div>
   <div class="home-buttons">
-    <button class="home-btn" onclick="enterGame('gomoku')">五子棋</button>
-    <button class="home-btn chess-btn" onclick="enterGame('chess')">国际象棋</button>
-    <button class="home-btn xiangqi-btn" onclick="enterGame('xiangqi')">中国象棋</button>
+    <button class="home-btn" onclick="showModeSelect('gomoku')">五子棋</button>
+    <button class="home-btn chess-btn" onclick="showModeSelect('chess')">国际象棋</button>
+    <button class="home-btn xiangqi-btn" onclick="showModeSelect('xiangqi')">中国象棋</button>
+  </div>
+</div>
+<div class="mode-overlay" id="modeOverlay">
+  <div class="mode-card">
+    <div class="mode-title">选择对战方式</div>
+    <div class="mode-buttons">
+      <button class="mode-btn local-btn" onclick="enterGame(selectedGame,'local')">当面对战</button>
+      <button class="mode-btn" onclick="enterGame(selectedGame,'online')">复制链接邀请好友</button>
+    </div>
+    <button class="mode-close" onclick="hideModeSelect()">取消</button>
   </div>
 </div>
 <script>
+var selectedGame = 'gomoku';
 function generateRoomId() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   let id = '';
   for (let i = 0; i < 6; i++) id += chars[Math.floor(Math.random() * chars.length)];
   return id;
 }
-function enterGame(game) {
+function showModeSelect(game) {
+  selectedGame = game;
+  document.getElementById('modeOverlay').classList.add('show');
+}
+function hideModeSelect() {
+  document.getElementById('modeOverlay').classList.remove('show');
+}
+function enterGame(game, mode) {
+  if (mode === 'local') {
+    location.href = '?game=' + game + '&mode=local';
+    return;
+  }
   const id = generateRoomId();
+  const link = location.origin + '?room=' + id + '&game=' + game;
+  try { navigator.clipboard.writeText(link); } catch (e) {}
   location.href = '?room=' + id + '&game=' + game;
 }
 </script>
@@ -974,6 +1010,7 @@ const XIANGQI_PIECE_NAMES = { k:'将帅', a:'士', e:'象', h:'马', r:'车', c:
 
 let gameType = 'gomoku';
 let myColor = null;
+let localMode = false; // 当面对战：纯客户端热座模式，无 WebSocket
 let currentTurn = 'black';
 let gameOver = false;
 let draw = false;
@@ -1045,14 +1082,19 @@ function generateRoomId() {
 function init() {
   const params = new URLSearchParams(location.search);
   roomId = params.get('room');
-  if (!roomId) {
-    // 没有房间号则回到首页
+  localMode = (params.get('mode') === 'local');
+  if (!roomId && !localMode) {
+    // 没有房间号且非当面对战则回到首页
     location.href = '/';
     return;
   }
   const g = params.get('game');
   gameType = (g === 'chess') ? 'chess' : (g === 'xiangqi') ? 'xiangqi' : 'gomoku';
-  document.getElementById('roomId').textContent = roomId;
+  document.getElementById('roomId').textContent = roomId || '当面对战';
+  if (localMode) {
+    initLocalGame();
+    return;
+  }
   // 先启动 WebSocket 连接（与 DOM 构建并行，减少首次交互延迟）
   connect();
   buildBoard();
@@ -1060,6 +1102,215 @@ function init() {
   // 刷新后从 sessionStorage 恢复聊天记录并立即渲染（无需等待重连）
   loadChatHistory();
   renderChatHistory();
+}
+
+// === 当面对战（纯客户端热座模式）===
+function initLocalGame() {
+  // 隐藏仅在线模式有意义的 UI
+  ['copyBtn', 'waitBtn', 'drawBtn', 'chatPanel', 'playerStatus'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+  // 初始化棋盘状态（镜像服务端逻辑）
+  if (gameType === 'chess') {
+    chessBoardData = Chess.initialBoard();
+    chessState = { castlingRights: { white: { k: true, q: true }, black: { k: true, q: true } }, enPassantTarget: null };
+    currentTurn = 'white';
+  } else if (gameType === 'xiangqi') {
+    xiangqiBoardData = Xiangqi.initialBoard();
+    xiangqiState = null;
+    currentTurn = 'red';
+  } else {
+    boardData = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
+    currentTurn = 'black';
+  }
+  myColor = currentTurn; // 复用现有回合守卫（myColor === currentTurn 即放行）
+  chessFlipped = false;
+  xiangqiFlipped = false;
+  gameOver = false;
+  draw = false;
+  checkColor = null;
+  chessSelected = null;
+  chessLegalMoves = [];
+  xiangqiSelected = null;
+  xiangqiLegalMoves = [];
+  lastMove = null;
+  rematchRole = null;
+  pendingPromotionMove = null;
+  moveHistory = [];
+  replaying = false;
+  replayIndex = 0;
+  simMode = false;
+  simMoves = [];
+  simColor = null;
+  exitReviewUI();
+  hideAllModals();
+  setRematchSelectDefaults();
+  buildBoard();
+  renderBoard();
+  moveHistory.push(snapshotState());
+  updateHeader();
+  setStatus('轮到 ' + colorLabel(currentTurn));
+}
+
+// 客户端五子棋胜负判定（复制自 room.js checkWin）
+function checkGomokuWin(row, col, color) {
+  const directions = [[1, 0], [0, 1], [1, 1], [1, -1]];
+  for (const [dr, dc] of directions) {
+    let count = 1;
+    for (let i = 1; i < 5; i++) {
+      const r = row + dr * i, c = col + dc * i;
+      if (r >= 0 && r < ROWS && c >= 0 && c < COLS && boardData[r][c] === color) count++;
+      else break;
+    }
+    for (let i = 1; i < 5; i++) {
+      const r = row - dr * i, c = col - dc * i;
+      if (r >= 0 && r < ROWS && c >= 0 && c < COLS && boardData[r][c] === color) count++;
+      else break;
+    }
+    if (count >= 5) return true;
+  }
+  return false;
+}
+
+function applyLocalGomokuMove(r, c) {
+  if (gameOver || boardData[r][c]) return;
+  const mover = currentTurn;
+  boardData[r][c] = mover;
+  lastMove = { row: r, col: c };
+  if (checkGomokuWin(r, c, mover)) {
+    gameOver = true;
+    draw = false;
+    renderGomoku();
+    moveHistory.push(snapshotState());
+    showLocalGameOver(mover, false);
+  } else {
+    currentTurn = (mover === 'black') ? 'white' : 'black';
+    myColor = currentTurn;
+    renderGomoku();
+    moveHistory.push(snapshotState());
+    updateHeader();
+    setStatus('轮到 ' + colorLabel(currentTurn));
+  }
+}
+
+function applyLocalChessMove(move, promotionPiece) {
+  if (gameOver || !chessBoardData) return;
+  const from = move.from, to = move.to;
+  const piece = chessBoardData[from.r][from.c];
+  if (!piece || piece.color !== currentTurn) return;
+  let legalMoves;
+  try { legalMoves = Chess.getLegalMoves(chessBoardData, from.r, from.c, chessState); } catch { return; }
+  let matched = legalMoves.find(function(m) {
+    return m.from.r === from.r && m.from.c === from.c && m.to.r === to.r && m.to.c === to.c && (m.special || null) === (move.special || null);
+  });
+  if (!matched) {
+    matched = legalMoves.find(function(m) {
+      return m.from.r === from.r && m.from.c === from.c && m.to.r === to.r && m.to.c === to.c;
+    });
+  }
+  if (!matched) return;
+  const VALID_PROMOTIONS = ['q', 'r', 'b', 'n'];
+  const promo = matched.special === 'promotion' ? (VALID_PROMOTIONS.includes(promotionPiece) ? promotionPiece : 'q') : undefined;
+  const mover = currentTurn;
+  const result = Chess.applyMove(chessBoardData, matched, chessState, promo);
+  chessBoardData = result.board;
+  chessState = result.newState;
+  lastMove = { from: { r: matched.from.r, c: matched.from.c }, to: { r: matched.to.r, c: matched.to.c } };
+  chessSelected = null;
+  chessLegalMoves = [];
+  const opponentColor = mover === 'white' ? 'black' : 'white';
+  currentTurn = opponentColor;
+  myColor = currentTurn;
+  if (Chess.isCheckmate(chessBoardData, opponentColor, chessState)) {
+    renderChess();
+    moveHistory.push(snapshotState());
+    showLocalGameOver(mover, false);
+  } else if (Chess.isStalemate(chessBoardData, opponentColor, chessState) || Chess.isInsufficientMaterial(chessBoardData)) {
+    renderChess();
+    moveHistory.push(snapshotState());
+    showLocalGameOver(null, true);
+  } else {
+    checkColor = Chess.isInCheck(chessBoardData, opponentColor) ? opponentColor : null;
+    renderChess();
+    moveHistory.push(snapshotState());
+    updateHeader();
+    if (checkColor) setStatus('将军！轮到 ' + colorLabel(currentTurn), true);
+    else setStatus('轮到 ' + colorLabel(currentTurn));
+  }
+}
+
+function applyLocalXiangqiMove(move) {
+  if (gameOver || !xiangqiBoardData) return;
+  const from = move.from, to = move.to;
+  const piece = xiangqiBoardData[from.r][from.c];
+  if (!piece || piece.color !== currentTurn) return;
+  let legalMoves;
+  try { legalMoves = Xiangqi.getLegalMoves(xiangqiBoardData, from.r, from.c, xiangqiState); } catch { return; }
+  const matched = legalMoves.find(function(m) {
+    return m.from.r === from.r && m.from.c === from.c && m.to.r === to.r && m.to.c === to.c;
+  });
+  if (!matched) return;
+  const mover = currentTurn;
+  const result = Xiangqi.applyMove(xiangqiBoardData, matched, xiangqiState);
+  xiangqiBoardData = result.board;
+  xiangqiState = result.newState;
+  lastMove = { from: { r: matched.from.r, c: matched.from.c }, to: { r: matched.to.r, c: matched.to.c } };
+  xiangqiSelected = null;
+  xiangqiLegalMoves = [];
+  const opponentColor = mover === 'red' ? 'black' : 'red';
+  currentTurn = opponentColor;
+  myColor = currentTurn;
+  if (Xiangqi.isCheckmate(xiangqiBoardData, opponentColor, xiangqiState)) {
+    renderXiangqi();
+    moveHistory.push(snapshotState());
+    showLocalGameOver(mover, false);
+  } else if (Xiangqi.isStalemate(xiangqiBoardData, opponentColor, xiangqiState)) {
+    // 困毙判负（中国象棋规则）
+    renderXiangqi();
+    moveHistory.push(snapshotState());
+    showLocalGameOver(mover, false);
+  } else {
+    checkColor = Xiangqi.isInCheck(xiangqiBoardData, opponentColor) ? opponentColor : null;
+    renderXiangqi();
+    moveHistory.push(snapshotState());
+    updateHeader();
+    if (checkColor) setStatus('将军！轮到 ' + colorLabel(currentTurn), true);
+    else setStatus('轮到 ' + colorLabel(currentTurn));
+  }
+}
+
+function showLocalGameOver(winner, isDraw) {
+  gameOver = true;
+  draw = isDraw;
+  checkColor = null;
+  renderBoard();
+  updateHeader();
+  var overlay = document.getElementById('resultOverlay');
+  overlay.classList.remove('hidden');
+  var txt = document.getElementById('resultText');
+  if (isDraw) {
+    txt.textContent = '🤝 和棋';
+    txt.style.color = '#f0a500';
+  } else {
+    txt.textContent = '🎉 ' + colorLabel(winner) + '胜利';
+    txt.style.color = '#4ecca3';
+  }
+  setRematchSelectDefaults();
+  var drawBtnEl = document.getElementById('drawBtn');
+  if (drawBtnEl) drawBtnEl.style.display = 'none';
+  var drawModalEl = document.getElementById('drawModal');
+  if (drawModalEl) drawModalEl.classList.add('hidden');
+  var drawWaitingEl = document.getElementById('drawWaiting');
+  if (drawWaitingEl) drawWaitingEl.classList.add('hidden');
+}
+
+function localRematch() {
+  var sel = document.getElementById('rematchGameSelect');
+  if (sel) gameType = sel.value;
+  document.getElementById('resultOverlay').classList.add('hidden');
+  exitReviewUI();
+  initLocalGame();
 }
 
 function buildBoard() {
@@ -1141,6 +1392,7 @@ function onGomokuCellClick(r, c) {
   if (simMode) { onSimCellClick(r, c); return; }
   if (gameOver || !myColor || myColor !== currentTurn) return;
   if (boardData[r][c]) return;
+  if (localMode) { applyLocalGomokuMove(r, c); return; }
   ws.send(JSON.stringify({ type: 'move', row: r, col: c }));
 }
 
@@ -1297,6 +1549,7 @@ function choosePromotion(piece) {
 }
 
 function sendChessMove(move, promotionPiece) {
+  if (localMode) { applyLocalChessMove(move, promotionPiece); return; }
   if (!ws || ws.readyState !== 1) return;
   const payload = { type: 'move', from: { r: move.from.r, c: move.from.c }, to: { r: move.to.r, c: move.to.c } };
   if (move.special) payload.special = move.special;
@@ -1561,6 +1814,7 @@ function onXiangqiCellClick(r, c) {
 }
 
 function sendXiangqiMove(move) {
+  if (localMode) { applyLocalXiangqiMove(move); return; }
   if (!ws || ws.readyState !== 1) return;
   const payload = { type: 'move', from: { r: move.from.r, c: move.from.c }, to: { r: move.to.r, c: move.to.c } };
   ws.send(JSON.stringify(payload));
@@ -1578,7 +1832,10 @@ function colorLabel(color) {
 
 function updateHeader() {
   const colorEl = document.getElementById('myColor');
-  if (myColor) {
+  if (localMode) {
+    colorEl.textContent = '当面对战';
+    colorEl.className = '';
+  } else if (myColor) {
     colorEl.textContent = colorLabel(myColor);
     colorEl.className = 'color-' + myColor;
   } else {
@@ -2448,6 +2705,7 @@ function connect() {
 }
 
 function requestRematch() {
+  if (localMode) { localRematch(); return; }
   if (ws && ws.readyState === 1) {
     const gt = document.getElementById('rematchGameSelect').value;
     rematchRole = 'requester';
@@ -2896,8 +3154,9 @@ export default {
     }
 
     const room = url.searchParams.get('room');
-    // 无 room 参数 → 返回模式选择首页
-    if (!room) {
+    const mode = url.searchParams.get('mode');
+    // 无 room 参数且非当面对战 → 返回模式选择首页
+    if (!room && mode !== 'local') {
       return new Response(HOMEPAGE_HTML, {
         headers: {
           'Content-Type': 'text/html;charset=utf-8',
