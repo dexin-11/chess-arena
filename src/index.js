@@ -728,7 +728,62 @@ const Chess = (function() {
     return legal;
   }
 
-  return { getLegalMoves, applyMove };
+  function hasAnyLegalMove(board, color, state) {
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const p = board[r][c];
+        if (p && p.color === color) {
+          if (getLegalMoves(board, r, c, state).length > 0) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function isCheckmate(board, color, state) {
+    return isInCheck(board, color) && !hasAnyLegalMove(board, color, state);
+  }
+
+  function isStalemate(board, color, state) {
+    return !isInCheck(board, color) && !hasAnyLegalMove(board, color, state);
+  }
+
+  function isInsufficientMaterial(board) {
+    const white = [];
+    const black = [];
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const p = board[r][c];
+        if (!p) continue;
+        const entry = { type: p.type, r, c };
+        (p.color === 'white' ? white : black).push(entry);
+      }
+    }
+    const nonKing = (arr) => arr.filter((p) => p.type !== 'k');
+    const w = nonKing(white);
+    const b = nonKing(black);
+    if (w.length === 0 && b.length === 0) return true;
+    if (w.length === 1 && b.length === 0 && (w[0].type === 'n' || w[0].type === 'b')) return true;
+    if (b.length === 1 && w.length === 0 && (b[0].type === 'n' || b[0].type === 'b')) return true;
+    if (w.length === 1 && b.length === 1 && w[0].type === 'b' && b[0].type === 'b') {
+      if ((w[0].r + w[0].c) % 2 === (b[0].r + b[0].c) % 2) return true;
+    }
+    return false;
+  }
+
+  function initialBoard() {
+    const board = Array.from({ length: 8 }, () => Array(8).fill(null));
+    const backRank = ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'];
+    for (let c = 0; c < 8; c++) {
+      board[0][c] = { type: backRank[c], color: 'black' };
+      board[1][c] = { type: 'p', color: 'black' };
+      board[6][c] = { type: 'p', color: 'white' };
+      board[7][c] = { type: backRank[c], color: 'white' };
+    }
+    return board;
+  }
+
+  return { getLegalMoves, applyMove, isInCheck, hasAnyLegalMove, isCheckmate, isStalemate, isInsufficientMaterial, initialBoard };
 })();
 
 // === 中国象棋规则引擎（前端本地版，与 src/xiangqi.js 同源） ===
@@ -989,7 +1044,45 @@ const Xiangqi = (function() {
     return legal;
   }
 
-  return { getLegalMoves, applyMove };
+  function hasAnyLegalMove(board, color, state) {
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const p = board[r][c];
+        if (p && p.color === color) {
+          if (getLegalMoves(board, r, c, state).length > 0) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function isCheckmate(board, color, state) {
+    return isInCheck(board, color) && !hasAnyLegalMove(board, color, state);
+  }
+
+  function isStalemate(board, color, state) {
+    return !isInCheck(board, color) && !hasAnyLegalMove(board, color, state);
+  }
+
+  function initialBoard() {
+    const board = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
+    const backRank = ['r', 'h', 'e', 'a', 'k', 'a', 'e', 'h', 'r'];
+    for (let c = 0; c < COLS; c++) {
+      board[0][c] = { type: backRank[c], color: 'black' };
+      board[9][c] = { type: backRank[c], color: 'red' };
+    }
+    board[2][1] = { type: 'c', color: 'black' };
+    board[2][7] = { type: 'c', color: 'black' };
+    board[7][1] = { type: 'c', color: 'red' };
+    board[7][7] = { type: 'c', color: 'red' };
+    for (let c = 0; c < COLS; c += 2) {
+      board[3][c] = { type: 'p', color: 'black' };
+      board[6][c] = { type: 'p', color: 'red' };
+    }
+    return board;
+  }
+
+  return { getLegalMoves, applyMove, isInCheck, hasAnyLegalMove, isCheckmate, isStalemate, initialBoard };
 })();
 
 const ROWS = 15, COLS = 15;
