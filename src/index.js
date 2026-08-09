@@ -18,25 +18,53 @@ body { font-family: 'Sora', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-
 .home-title { font-size: 28px; font-weight: 700; color: #e94560; letter-spacing: 2px; }
 .home-subtitle { font-size: 14px; color: #8892b0; margin-top: -16px; letter-spacing: 0.3px; }
 .home-buttons { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; }
-.home-btn { padding: 28px 36px; border: none; border-radius: 12px; font-size: 22px; font-family: 'Sora', sans-serif; cursor: pointer; background: #e94560; color: #fff; font-weight: 600; transition: background 0.2s, transform 0.15s; min-width: 180px; letter-spacing: 1px; }
-.home-btn:hover { background: #c73650; }
+.home-btn { padding: 28px 36px; border: none; border-radius: 12px; font-size: 22px; font-family: 'Sora', sans-serif; cursor: pointer; background: #e94560; color: #fff; font-weight: 600; transition: background 0.2s, transform 0.2s cubic-bezier(0.22,1,0.36,1), box-shadow 0.2s ease; min-width: 180px; letter-spacing: 1px; box-shadow: 0 6px 18px rgba(0,0,0,0.4); }
+.home-btn:hover { background: #c73650; transform: translateY(-3px); box-shadow: 0 12px 28px rgba(233,69,96,0.5); }
 .home-btn:active { transform: scale(0.97); }
 .home-btn.chess-btn { background: #0f3460; }
-.home-btn.chess-btn:hover { background: #1a4a8a; }
+.home-btn.chess-btn:hover { background: #1a4a8a; box-shadow: 0 12px 28px rgba(15,52,96,0.6); }
 .home-btn.xiangqi-btn { background: #8B4513; }
-.home-btn.xiangqi-btn:hover { background: #A0522D; }
+.home-btn.xiangqi-btn:hover { background: #A0522D; box-shadow: 0 12px 28px rgba(139,69,19,0.6); }
 .mode-overlay { position: fixed; inset: 0; background: rgba(5,8,18,0.7); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); display: none; align-items: center; justify-content: center; z-index: 100; }
 .mode-overlay.show { display: flex; }
 .mode-card { background: linear-gradient(180deg, rgba(28,34,56,0.97), rgba(19,24,41,0.9)); border: 1px solid #2a3458; border-radius: 16px; padding: 36px 32px; display: flex; flex-direction: column; align-items: center; gap: 20px; box-shadow: 0 12px 40px rgba(0,0,0,0.7); min-width: 280px; }
 .mode-title { font-size: 22px; font-weight: 700; color: #e94560; letter-spacing: 1px; }
 .mode-buttons { display: flex; flex-direction: column; gap: 14px; width: 100%; }
-.mode-btn { padding: 16px 20px; border: none; border-radius: 10px; font-size: 17px; font-family: 'Sora', sans-serif; cursor: pointer; background: #0f3460; color: #fff; font-weight: 600; transition: background 0.2s, transform 0.15s; letter-spacing: 0.5px; }
-.mode-btn:hover { background: #1a4a8a; }
+.mode-btn { padding: 16px 20px; border: none; border-radius: 10px; font-size: 17px; font-family: 'Sora', sans-serif; cursor: pointer; background: #0f3460; color: #fff; font-weight: 600; transition: background 0.2s, transform 0.18s cubic-bezier(0.22,1,0.36,1), box-shadow 0.2s ease; letter-spacing: 0.5px; box-shadow: 0 4px 14px rgba(0,0,0,0.35); }
+.mode-btn:hover { background: #1a4a8a; transform: translateY(-2px); box-shadow: 0 8px 20px rgba(15,52,96,0.5); }
 .mode-btn:active { transform: scale(0.97); }
 .mode-btn.local-btn { background: #e94560; }
-.mode-btn.local-btn:hover { background: #c73650; }
-.mode-close { background: none; border: none; color: #8892b0; font-size: 14px; cursor: pointer; margin-top: 4px; }
+.mode-btn.local-btn:hover { background: #c73650; box-shadow: 0 8px 20px rgba(233,69,96,0.5); }
+.mode-close { background: none; border: none; color: #8892b0; font-size: 14px; cursor: pointer; margin-top: 4px; transition: color 0.2s ease; }
 .mode-close:hover { color: #eee; }
+
+/* === 首页入场与浮层动画 === */
+@keyframes homeCardIn {
+  from { opacity: 0; transform: translateY(16px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.home-card { animation: homeCardIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
+@keyframes homeItemIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.home-title { animation: homeItemIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both; }
+.home-subtitle { animation: homeItemIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.18s both; }
+.home-buttons { animation: homeItemIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.26s both; }
+
+/* 模式浮层：背景淡入 + 卡片缩放滑入 */
+@keyframes overlayFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modalPop {
+  from { opacity: 0; transform: translateY(12px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.mode-overlay.show { animation: overlayFade 0.25s ease-out; }
+.mode-overlay.show .mode-card { animation: modalPop 0.35s cubic-bezier(0.16, 1, 0.3, 1); transform-origin: center; }
+
+/* 无障碍：尊重「减少动态」偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+}
 </style>
 </head>
 <body>
@@ -348,6 +376,75 @@ body {
   .game-area { flex-direction: row; gap: 12px; padding: 0 12px 12px; }
   .board-container { flex: 1; min-width: 0; }
   .chat-panel { width: 320px; height: auto; flex: 0 0 320px; }
+}
+
+/* === 高级动效（GPU 友好：仅 transform / opacity / box-shadow） === */
+/* 落子回弹：五子棋棋子（元素插入即播放，含居中 translate） */
+@keyframes stoneDrop {
+  0%   { transform: translate(-50%, -50%) scale(0.2); opacity: 0; }
+  55%  { transform: translate(-50%, -50%) scale(1.12); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1); }
+}
+.cell .stone { animation: stoneDrop 0.24s cubic-bezier(0.34, 1.56, 0.64, 1); }
+
+/* 落子回弹：国际象棋 / 中国象棋棋子（仅 lastMove 目的格触发） */
+@keyframes pieceArrive {
+  0%   { transform: scale(0.4); opacity: 0.2; }
+  55%  { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1); }
+}
+.chess-cell .piece.just-moved { animation: pieceArrive 0.24s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.xiangqi-cell .xpiece.just-moved { animation: pieceArrive 0.24s cubic-bezier(0.34, 1.56, 0.64, 1); }
+
+/* 走法提示淡入：点 / 环出现时柔和放大 */
+@keyframes hintIn { from { transform: scale(0.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.chess-cell .move-dot { animation: hintIn 0.18s ease-out; }
+.chess-cell .capture-ring { animation: hintIn 0.18s ease-out; }
+.xiangqi-cell .move-hint.move-dot { animation: hintIn 0.18s ease-out; transform-origin: center; }
+.xiangqi-cell .move-hint.capture-ring { animation: hintIn 0.18s ease-out; transform-origin: center; }
+
+/* 上一步高亮：目的格边框一次性淡入（不与 selected/check-king 冲突） */
+@keyframes lastMoveIn { from { box-shadow: inset 0 0 0 min(0.4vmin, 4px) transparent; } }
+.chess-cell.last-move { animation: lastMoveIn 0.3s ease-out; }
+.xiangqi-cell.last-move { animation: lastMoveIn 0.3s ease-out; }
+
+/* 终局弹窗：淡入 + 轻微放大 */
+@keyframes overlayIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.result-overlay:not(.hidden) { animation: overlayIn 0.35s cubic-bezier(0.16, 1, 0.3, 1); transform-origin: center; }
+.rematch-modal:not(.hidden) { animation: overlayIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); transform-origin: center; }
+.promotion-modal:not(.hidden) { animation: overlayIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); transform-origin: center; }
+.result-overlay > *, .rematch-modal > *, .promotion-modal > * { animation: overlayIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* 吃子提示：从上方滑入（每次出现重放） */
+@keyframes captureIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.capture-notice.anim-in { animation: captureIn 0.3s ease-out; }
+
+/* 状态文字：颜色与透明度平滑过渡 */
+.status-msg { transition: color 0.25s ease, opacity 0.25s ease; }
+
+/* 回合指示器：颜色平滑过渡 */
+.header-item span { transition: color 0.25s ease; }
+
+/* 等待浮层：保留既有 slideDown，补淡入 */
+.wait-notice-overlay { will-change: transform, opacity; }
+
+/* 棋盘容器：首屏淡入，降低重建时的视觉跳变 */
+@keyframes boardIn { from { opacity: 0; } to { opacity: 1; } }
+.board { animation: boardIn 0.4s ease-out; }
+
+/* 选中态过渡：放大更顺滑（取消选中不回弹，落子回弹由 just-moved 动画承担） */
+.chess-cell .piece { transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1); }
+.xiangqi-cell .xpiece { transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.18s ease; }
+
+/* 无障碍：尊重「减少动态」偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
 }
 </style>
 </head>
@@ -1115,12 +1212,14 @@ let chessState = null;       // 与服务端同步的规则状态（易位权、
 let chessSelected = null;
 let chessLegalMoves = [];
 let chessFlipped = false;
+let chessCellRefs = null; // 缓存 64 个 cell DOM 引用，避免每次 render 全量重建（与 xiangqiCellRefs 同构）
 let xiangqiBoardData = null;
 let xiangqiState = null;
 let xiangqiSelected = null;
 let xiangqiLegalMoves = [];
 let xiangqiFlipped = false;
 let xiangqiCellRefs = null; // 缓存 90 个 cell DOM 引用，避免每次 render 全量重建
+let gomokuCellRefs = null; // 缓存 225 个 cell DOM 引用，避免每次 render 触发 querySelector
 let lastMove = null;
 let checkColor = null;
 let rematchRole = null; // 'requester' | 'accepter' | null
@@ -1409,8 +1508,10 @@ function localRematch() {
 function buildBoard() {
   const boardEl = document.getElementById('board');
   boardEl.innerHTML = '';
-  // 切换棋种/重建时清空中国象棋 DOM 缓存，强制重新构建
+  // 切换棋种/重建时清空棋盘 DOM 缓存，强制重新构建
+  chessCellRefs = null;
   xiangqiCellRefs = null;
+  gomokuCellRefs = null;
   if (gameType === 'chess') {
     boardEl.className = 'board chess';
     renderChess();
@@ -1426,7 +1527,9 @@ function buildBoard() {
 function buildGomokuBoard() {
   const grid = document.createElement('div');
   grid.className = 'board-grid';
+  gomokuCellRefs = { _grid: grid };
   for (let r = 0; r < ROWS; r++) {
+    gomokuCellRefs[r] = {};
     for (let c = 0; c < COLS; c++) {
       const cell = document.createElement('div');
       cell.className = 'cell';
@@ -1436,6 +1539,7 @@ function buildGomokuBoard() {
       cell.addEventListener('mouseenter', () => onCellHover(r, c, cell));
       cell.addEventListener('mouseleave', () => onCellLeave(cell));
       grid.appendChild(cell);
+      gomokuCellRefs[r][c] = cell;
     }
   }
   document.getElementById('board').appendChild(grid);
@@ -1448,13 +1552,18 @@ function renderBoard() {
 }
 
 function getCell(r, c) {
+  // 优先用缓存引用，避免每次 render 触发 225 次 querySelector
+  if (gomokuCellRefs && gomokuCellRefs[r] && gomokuCellRefs[r][c]) return gomokuCellRefs[r][c];
   return document.querySelector('.cell[data-row="' + r + '"][data-col="' + c + '"]');
 }
 
 function renderGomoku() {
+  if (!gomokuCellRefs) return;
   for (let r = 0; r < ROWS; r++) {
+    const row = gomokuCellRefs[r];
+    if (!row) continue;
     for (let c = 0; c < COLS; c++) {
-      const cell = getCell(r, c);
+      const cell = row[c];
       if (!cell) continue;
       const existing = cell.querySelector('.stone');
       if (boardData[r][c]) {
@@ -1503,18 +1612,34 @@ function onCellLeave(cell) {
   if (preview) preview.remove();
 }
 
+// === 国际象棋渲染与交互（缓存 + 增量更新）===
+// 与中国象棋同构：DOM 只在首次/翻转/重建时构建一次，
+// 后续选中/取消/走子只更新 cell 的 class 与子元素内容，避免 64 节点全量重建，
+// 显著降低走棋延迟（选中不再触发整盘 layout/paint）。
 function renderChess() {
   const boardEl = document.getElementById('board');
+  const needRebuild = !chessCellRefs
+    || chessCellRefs._flipped !== chessFlipped
+    || boardEl.querySelector('.chess-grid') !== chessCellRefs._grid;
+  if (needRebuild) buildChessDOM(boardEl);
+  updateChessCells();
+}
+
+// 首次构建棋盘 DOM：grid + 64 cell + 坐标 + 棋子/提示占位容器。
+// cell 引用缓存到 chessCellRefs[r][c]，事件委托到 grid 上，避免 64 个 listener。
+function buildChessDOM(boardEl) {
   boardEl.innerHTML = '';
   const grid = document.createElement('div');
   grid.className = 'chess-grid';
 
+  chessCellRefs = { _grid: grid, _flipped: chessFlipped };
   const rows = chessFlipped ? [7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7];
   const cols = chessFlipped ? [7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7];
   const leftmostCol = chessFlipped ? 7 : 0;
   const bottomRow = chessFlipped ? 0 : 7;
 
   for (const r of rows) {
+    chessCellRefs[r] = {};
     for (const c of cols) {
       const cell = document.createElement('div');
       const isLight = (r + c) % 2 === 0;
@@ -1522,45 +1647,18 @@ function renderChess() {
       cell.dataset.row = r;
       cell.dataset.col = c;
 
-      const piece = (chessBoardData && chessBoardData[r]) ? chessBoardData[r][c] : null;
-      if (piece && CHESS_GLYPHS[piece.color] && CHESS_GLYPHS[piece.color][piece.type]) {
-        const span = document.createElement('span');
-        span.className = 'piece ' + piece.color;
-        span.textContent = CHESS_GLYPHS[piece.color][piece.type];
-        cell.appendChild(span);
-      }
+      // 棋子容器（固定占位，更新时只改内容与显隐）
+      const pieceSpan = document.createElement('span');
+      pieceSpan.className = 'piece';
+      pieceSpan.style.display = 'none';
+      cell.appendChild(pieceSpan);
+      // 走法提示容器（复用 move-dot / capture-ring 类名，沿用既有 CSS）
+      const hintSpan = document.createElement('span');
+      hintSpan.className = 'move-dot';
+      hintSpan.style.display = 'none';
+      cell.appendChild(hintSpan);
 
-      if (chessSelected && chessSelected.r === r && chessSelected.c === c) {
-        cell.classList.add('selected');
-      }
-      if (lastMove && ((lastMove.from.r === r && lastMove.from.c === c) || (lastMove.to.r === r && lastMove.to.c === c))) {
-        cell.classList.add('last-move');
-      }
-      if (checkColor && piece && piece.type === 'k' && piece.color === checkColor) {
-        cell.classList.add('check-king');
-      }
-
-      const moveTo = chessLegalMoves.find(m => m.to.r === r && m.to.c === c);
-      if (moveTo) {
-        if (piece) {
-          const ring = document.createElement('span');
-          ring.className = 'capture-ring';
-          cell.appendChild(ring);
-        } else {
-          const dot = document.createElement('span');
-          dot.className = 'move-dot';
-          cell.appendChild(dot);
-        }
-      }
-
-      // 王车易位：选中王时，在可参与易位的车上显示绿色高亮提示
-      if (chessSelected && piece && piece.type === 'r' && piece.color === myColor) {
-        const hasKingside = chessLegalMoves.some(m => m.special === 'castle-kingside' && r === chessSelected.r && c === 7);
-        const hasQueenside = chessLegalMoves.some(m => m.special === 'castle-queenside' && r === chessSelected.r && c === 0);
-        if (hasKingside || hasQueenside) cell.classList.add('castle-hint');
-      }
-
-      // 坐标标签
+      // 坐标标签（仅在边界格绘制，翻转时随 DOM 重建而重排）
       if (c === leftmostCol) {
         const rank = document.createElement('span');
         rank.className = 'coord rank';
@@ -1574,11 +1672,83 @@ function renderChess() {
         cell.appendChild(file);
       }
 
-      cell.addEventListener('click', () => onChessCellClick(r, c));
+      chessCellRefs[r][c] = { cell, piece: pieceSpan, hint: hintSpan };
       grid.appendChild(cell);
     }
   }
+
+  // 事件委托：单个 listener 处理所有 cell 点击，避免 64 个闭包
+  grid.addEventListener('click', (e) => {
+    const cell = e.target.closest('.chess-cell');
+    if (!cell || !grid.contains(cell)) return;
+    const r = +cell.dataset.row;
+    const c = +cell.dataset.col;
+    onChessCellClick(r, c);
+  });
+
   boardEl.appendChild(grid);
+}
+
+// 增量更新：仅修改 class 与子元素内容，不重建 DOM。
+function updateChessCells() {
+  if (!chessCellRefs) return;
+  const legalByTo = new Map();
+  for (const m of chessLegalMoves) legalByTo.set(m.to.r + ',' + m.to.c, m);
+  const lastFromKey = lastMove ? lastMove.from.r + ',' + lastMove.from.c : null;
+  const lastToKey = lastMove ? lastMove.to.r + ',' + lastMove.to.c : null;
+  const selKey = chessSelected ? chessSelected.r + ',' + chessSelected.c : null;
+  const selRow = chessSelected ? chessSelected.r : -1;
+  const hasKingside = chessLegalMoves.some(m => m.special === 'castle-kingside');
+  const hasQueenside = chessLegalMoves.some(m => m.special === 'castle-queenside');
+
+  for (let r = 0; r < 8; r++) {
+    const row = chessCellRefs[r];
+    if (!row) continue;
+    for (let c = 0; c < 8; c++) {
+      const ref = row[c];
+      if (!ref) continue;
+      const piece = (chessBoardData && chessBoardData[r]) ? chessBoardData[r][c] : null;
+      const key = r + ',' + c;
+
+      // 棋子内容
+      const pieceEl = ref.piece;
+      if (piece && CHESS_GLYPHS[piece.color] && CHESS_GLYPHS[piece.color][piece.type]) {
+        const glyph = CHESS_GLYPHS[piece.color][piece.type];
+        const wantClass = 'piece ' + piece.color;
+        if (pieceEl.textContent !== glyph || pieceEl.className !== wantClass) {
+          pieceEl.className = wantClass;
+          pieceEl.textContent = glyph;
+        }
+        if (pieceEl.style.display !== '') pieceEl.style.display = '';
+      } else {
+        if (pieceEl.style.display !== 'none') pieceEl.style.display = 'none';
+        pieceEl.textContent = '';
+      }
+      // 刚落子：触发到位回弹动画（仅 lastMove 目的格）
+      pieceEl.classList.toggle('just-moved', key === lastToKey);
+
+      // 走法提示
+      const move = legalByTo.get(key);
+      const hintEl = ref.hint;
+      if (move) {
+        const wantClass = piece ? 'capture-ring' : 'move-dot';
+        if (hintEl.className !== wantClass) hintEl.className = wantClass;
+        if (hintEl.style.display !== '') hintEl.style.display = '';
+      } else {
+        if (hintEl.style.display !== 'none') hintEl.style.display = 'none';
+      }
+
+      // class 增量
+      const cell = ref.cell;
+      cell.classList.toggle('selected', key === selKey);
+      cell.classList.toggle('last-move', key === lastFromKey || key === lastToKey);
+      cell.classList.toggle('check-king', !!(checkColor && piece && piece.type === 'k' && piece.color === checkColor));
+      // 王车易位：选中王时，在可参与易位的车上显示绿色高亮提示
+      const isCastleHint = !!(chessSelected && piece && piece.type === 'r' && piece.color === myColor
+        && r === selRow && ((hasKingside && c === 7) || (hasQueenside && c === 0)));
+      cell.classList.toggle('castle-hint', isCastleHint);
+    }
+  }
 }
 
 function onChessCellClick(r, c) {
@@ -1856,6 +2026,8 @@ function updateXiangqiCells() {
         if (pieceEl.style.display !== 'none') pieceEl.style.display = 'none';
         pieceEl.textContent = '';
       }
+      // 刚落子：触发到位回弹动画（仅 lastMove 目的格）
+      pieceEl.classList.toggle('just-moved', key === lastToKey);
 
       // 走法提示
       const move = legalByTo.get(key);
@@ -2449,6 +2621,10 @@ function showCaptureNotice(piece, gt) {
   }
   el.innerHTML = '对方吃了你的 ' + name +
     (glyph ? ' <span class="capture-glyph">' + glyph + '</span>' : '');
+  // 重放滑入动画
+  el.classList.remove('anim-in');
+  void el.offsetWidth; // 强制 reflow 以重启动画
+  el.classList.add('anim-in');
 }
 function clearCaptureNotice() {
   var el = document.getElementById('captureNotice');
