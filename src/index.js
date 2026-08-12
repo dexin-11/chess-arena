@@ -1,7 +1,18 @@
+/**
+ * 棋类对战应用 - 前端入口文件
+ * 包含：首页模板、游戏页面模板、前端规则引擎（国际象棋/中国象棋）、
+ * WebSocket 通信、端到端加密聊天、复盘/模拟重下等功能。
+ */
+
+// 导入房间管理 Durable Object 类
 import { Room } from './room.js';
 
+// 导出 Room 供 Cloudflare Workers 路由绑定
 export { Room };
 
+// === 首页模板（HOMEPAGE_HTML）===
+// 游戏选择首页：展示三种棋类（五子棋、国际象棋、中国象棋）入口，
+// 支持当面对战和复制链接邀请好友两种模式。内联 CSS 与 JS 实现自包含页面。
 const HOMEPAGE_HTML = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -95,6 +106,9 @@ function enterGame(game, mode) {
 </body>
 </html>`;
 
+// === 游戏页面模板（GAME_HTML）===
+// 包含：棋盘渲染、聊天面板、状态栏、复盘控制条、弹窗等全部 DOM 结构，
+// 以及内联 CSS 样式和 JS 逻辑。是一个自包含的单页应用 HTML 模板。
 const GAME_HTML = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -112,12 +126,13 @@ const GAME_HTML = `<!DOCTYPE html>
     })(window, document, "clarity", "script", "xzlilpcqo4");
 </script>
 <style>
+/* ---- CSS 变量定义 ---- */
 :root {
-  --bg-0: #0a0d1a; --bg-1: #131829; --bg-2: #1c2238;
-  --border: #2a3458; --accent: #e94560;
-  --text: #e8ecf4; --text-dim: #8892b0;
-  --good: #4ecca3; --warn: #f0a500; --bad: #e94560;
-  --board-wood: #DEB887; --board-line: #8B7355;
+  --bg-0: #0a0d1a; --bg-1: #131829; --bg-2: #1c2238; /* 背景色阶 */
+  --border: #2a3458; --accent: #e94560;               /* 边框与强调色 */
+  --text: #e8ecf4; --text-dim: #8892b0;                /* 文本颜色 */
+  --good: #4ecca3; --warn: #f0a500; --bad: #e94560;    /* 状态颜色（好/警告/坏） */
+  --board-wood: #DEB887; --board-line: #8B7355;         /* 棋盘木色与网格线 */
   /* 手机端：棋盘下方留出聊天面板（约 170px）+ 头部与按钮行开销 */
   --board-size: min(96vw, calc(100vh - 320px));
   --board-size: min(96vw, calc(100dvh - 320px));
@@ -133,6 +148,7 @@ body {
   user-select: none; -webkit-user-select: none;
 }
 
+/* 页面头部：房间信息、玩家颜色、回合状态 */
 .header { flex-shrink: 0; padding: 8px 14px; padding-top: max(8px, env(safe-area-inset-top)); background: linear-gradient(180deg, rgba(28,34,56,0.95), rgba(19,24,41,0.85)); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; }
 .header-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13px; font-weight: 500; }
 .header-item { display: inline-flex; align-items: center; gap: 4px; color: var(--text-dim); letter-spacing: 0.3px; }
@@ -149,12 +165,13 @@ body {
 .latency-ok { color: var(--warn); }
 .latency-bad { color: var(--bad); }
 
+/* 棋盘容器：居中放置棋盘，垂直方向自适应 */
 .board-container { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 8px; }
 
 /* 游戏区域：手机端纵向（棋盘在上、聊天在下），桌面端横向（棋盘在左、聊天在右） */
 .game-area { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 0 8px 8px; }
 
-/* 聊天面板 */
+/* 聊天面板：消息列表 + 输入框 + 折叠/展开功能 */
 .chat-panel { flex-shrink: 0; display: flex; flex-direction: column; background: linear-gradient(180deg, rgba(28,34,56,0.95), rgba(19,24,41,0.85)); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; height: 170px; transition: height 0.2s ease; }
 .chat-panel.collapsed { height: auto; }
 .chat-panel.collapsed .chat-body { display: none; }
@@ -184,6 +201,7 @@ body {
 .chat-input-row input:focus { border-color: var(--accent); }
 .chat-send-btn { padding: 7px 14px; font-size: 12px; flex-shrink: 0; }
 
+/* 状态消息：显示当前轮到谁、将军提示等 */
 .status-msg { font-size: 13px; color: var(--text-dim); min-height: 18px; text-align: center; letter-spacing: 0.5px; flex-shrink: 0; font-weight: 500; }
 .status-msg.check-msg { color: var(--bad); font-weight: 700; font-size: 14px; animation: checkPulse 1s ease-in-out infinite; }
 @keyframes checkPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
@@ -198,11 +216,13 @@ body {
 /* 模拟重下模式：棋盘绿色描边高亮 */
 .board.sim-active { box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 3px #4ecca3, inset 0 1px 0 rgba(255,255,255,0.15); }
 
+/* 五子棋棋盘网格：15x15 网格线 + 落子棋子 + 预览落点 */
 .board-grid { width: 100%; height: 100%; display: grid; grid-template-columns: repeat(15, 1fr); grid-template-rows: repeat(15, 1fr); gap: 0; }
 .cell { width: 100%; height: 100%; position: relative; cursor: pointer; }
 .cell::before { content: ''; position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: var(--board-line); }
 .cell::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--board-line); }
 
+/* 棋子样式：黑白棋子渐变 + 阴影 */
 .cell .stone { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 82%; height: 82%; border-radius: 50%; z-index: 2; }
 .stone.black { background: radial-gradient(circle at 35% 30%, #4a4a4a, #050505 70%); box-shadow: 1px 2px 4px rgba(0,0,0,0.6), inset 0 -2px 4px rgba(0,0,0,0.5); }
 .stone.white { background: radial-gradient(circle at 35% 30%, #ffffff, #b0b0b0 80%); box-shadow: 1px 2px 4px rgba(0,0,0,0.4), inset 0 -2px 4px rgba(0,0,0,0.2); }
@@ -267,6 +287,7 @@ body {
 .xiangqi-cell .move-dot { position: absolute; width: 26%; height: 26%; border-radius: 50%; background: rgba(60,30,10,0.3); pointer-events: none; z-index: 2; left: 50%; top: 50%; transform: translate(-50%, -50%); }
 .xiangqi-cell .capture-ring { position: absolute; inset: 7%; border: min(0.5vmin,5px) solid rgba(233,69,96,0.6); border-radius: 50%; box-sizing: border-box; pointer-events: none; z-index: 2; }
 
+/* 通用按钮样式 */
 .btn { padding: 8px 14px; border: none; border-radius: 8px; font-size: 13px; font-family: 'Sora', sans-serif; font-weight: 600; cursor: pointer; background: var(--accent); color: #fff; transition: background 0.2s, transform 0.1s; letter-spacing: 0.3px; }
 .btn:hover { background: #c73650; }
 .btn:active { transform: scale(0.96); }
@@ -274,12 +295,14 @@ body {
 .btn-secondary:hover { background: #3a4578; }
 .button-row { display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap; justify-content: center; }
 
+/* 等待对手加入遮罩 */
 .waiting-overlay { position: fixed; inset: 0; background: rgba(10,13,26,0.85); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; z-index: 100; }
 .waiting-overlay.hidden { display: none; }
 .spinner { width: 36px; height: 36px; border: 3px solid rgba(255,255,255,0.1); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .waiting-text { font-size: 16px; color: var(--text); }
 
+/* 结果弹窗：显示胜负/和棋 + 再来一局/复盘按钮 */
 .result-overlay { position: fixed; inset: 0; background: rgba(10,13,26,0.88); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; z-index: 100; }
 .result-overlay.hidden { display: none; }
 .result-text { font-size: 26px; font-weight: 700; letter-spacing: 1px; }
@@ -306,21 +329,25 @@ body {
 .review-bar .divider { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
 .review-bar .review-sim-hint { font-size: 11px; color: var(--good); font-weight: 600; }
 
+/* 再来一局弹窗（全屏遮罩） */
 .rematch-modal { position: fixed; inset: 0; background: rgba(10,13,26,0.88); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; z-index: 110; }
 .rematch-modal.hidden { display: none; }
 .rematch-modal-text { font-size: 16px; color: var(--text); text-align: center; }
 .rematch-buttons { display: flex; gap: 12px; }
 
+/* "等一会"通知弹窗：顶部滑入，不遮挡棋盘 */
 .wait-notice-overlay { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); background: var(--accent); color: #fff; padding: 12px 22px; border-radius: 10px; font-size: 14px; font-weight: 600; box-shadow: 0 4px 20px rgba(233,69,96,0.5); z-index: 200; animation: slideDown 0.3s ease; display: flex; align-items: center; gap: 12px; }
 .wait-notice-overlay .ack-btn { background: #fff; color: var(--accent); border: none; padding: 4px 12px; border-radius: 6px; font-weight: 700; cursor: pointer; font-size: 12px; }
 @keyframes slideDown { from { transform: translate(-50%, -100px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
 
+/* 兵升变弹窗：选择升变后的棋子类型 */
 .promotion-modal { position: fixed; inset: 0; background: rgba(10,13,26,0.88); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; z-index: 120; }
 .promotion-modal.hidden { display: none; }
 .promotion-text { font-size: 16px; color: var(--text); }
 .promotion-buttons { display: flex; gap: 12px; }
 .promotion-btn { font-size: 24px; min-width: 60px; }
 
+/* 手机端（<=540px）：缩小字体和间距，调整棋盘尺寸 */
 @media (max-width: 540px) {
   :root {
     /* 小屏手机：聊天面板收窄至 150px，棋盘高度同步调小 */
@@ -367,6 +394,7 @@ body {
 </head>
 <body>
 
+<!-- 页面头部：显示房间号、玩家颜色、回合数、网络状态 -->
 <div class="header">
   <div class="header-row">
     <div class="header-item">房间: <span id="roomId">—</span></div>
@@ -379,7 +407,9 @@ body {
   </div>
 </div>
 
+<!-- 游戏主区域：左侧棋盘 + 右侧聊天（桌面端布局） -->
 <div class="game-area">
+  <!-- 棋盘容器：包含状态消息、吃子提示、棋盘、操作按钮 -->
   <div class="board-container">
     <div class="status-msg" id="statusMsg"></div>
     <div class="capture-notice" id="captureNotice"></div>
@@ -390,6 +420,7 @@ body {
       <button class="btn btn-secondary" id="drawBtn" onclick="sendDrawOffer()">求和</button>
     </div>
   </div>
+  <!-- 聊天面板：消息列表 + 输入框，支持折叠/展开 -->
   <aside class="chat-panel" id="chatPanel">
     <div class="chat-header" id="chatHeader">
       <span class="chat-toggle" id="chatToggle">▼</span>
@@ -407,12 +438,14 @@ body {
   </aside>
 </div>
 
+<!-- 等待对手加入遮罩（含加载动画） -->
 <div class="waiting-overlay" id="waitingOverlay">
   <div class="spinner"></div>
   <div class="waiting-text">等待好友加入...</div>
   <button class="btn" id="copyBtnWaiting" onclick="copyLink('copyBtnWaiting')">复制链接邀请好友</button>
 </div>
 
+<!-- 比赛结果弹窗：显示胜负/和棋，提供再来一局/复盘操作 -->
 <div class="result-overlay hidden" id="resultOverlay">
   <div class="result-text" id="resultText"></div>
   <div class="rematch-select-row">
@@ -430,6 +463,7 @@ body {
   </div>
 </div>
 
+<!-- 复盘控制条：固定在底部，提供步进导航、模拟重下、导出功能 -->
 <div class="review-bar hidden" id="reviewBar">
   <span class="review-title">复盘</span>
   <button class="btn nav-btn" id="reviewStartBtn" onclick="reviewGoto(0)" title="回到开局">⏮</button>
@@ -445,6 +479,7 @@ body {
   <button class="btn exit-btn" onclick="exitReview()">退出</button>
 </div>
 
+<!-- 再来一局请求弹窗：对方请求时显示 -->
 <div class="rematch-modal hidden" id="rematchModal">
   <div class="rematch-modal-text" id="rematchModalText">对方请求再来一局</div>
   <div class="rematch-buttons">
@@ -453,11 +488,13 @@ body {
   </div>
 </div>
 
+<!-- 等待对方同意再来一局 -->
 <div class="rematch-modal hidden" id="rematchWaiting">
   <div class="rematch-modal-text">等待对方同意...</div>
   <button class="btn btn-secondary" onclick="cancelRematch()">取消</button>
 </div>
 
+<!-- 求和请求弹窗：对方请求和棋时显示 -->
 <div class="rematch-modal hidden" id="drawModal">
   <div class="rematch-modal-text" id="drawModalText">对方请求求和</div>
   <div class="rematch-buttons">
@@ -466,11 +503,13 @@ body {
   </div>
 </div>
 
+<!-- 等待对方回应求和 -->
 <div class="rematch-modal hidden" id="drawWaiting">
   <div class="rematch-modal-text">等待对方回应求和...</div>
   <button class="btn btn-secondary" onclick="cancelDraw()">取消</button>
 </div>
 
+<!-- 兵升变选择弹窗：选择升变棋子类型（后/车/象/马） -->
 <div class="promotion-modal hidden" id="promotionModal">
   <div class="promotion-text">选择升变棋子</div>
   <div class="promotion-buttons">
@@ -485,21 +524,38 @@ body {
 // === 国际象棋规则引擎（前端本地版，与 src/chess.js 同源） ===
 // 选中棋子时本地计算合法走法，避免每次都向服务端 RTT。
 const Chess = (function() {
-  const ROOK_DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-  const BISHOP_DIRS = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
-  const KING_DIRS = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
-  const KNIGHT_DELTAS = [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]];
+  // 方向常量定义
+  const ROOK_DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]];      // 车走法方向
+  const BISHOP_DIRS = [[-1, -1], [-1, 1], [1, -1], [1, 1]];   // 象走法方向
+  const KING_DIRS = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]]; // 王走法方向
+  const KNIGHT_DELTAS = [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]]; // 马走法方向
+  // 车原始位置 → 易位类型映射（用于判断易位权是否变更）
   const ROOK_ORIGINS = {
     white: { '7,0': 'q', '7,7': 'k' },
     black: { '0,0': 'q', '0,7': 'k' },
   };
+  /** 检查坐标是否在棋盘内 */
   const inBounds = (r, c) => r >= 0 && r < 8 && c >= 0 && c < 8;
+  /** 返回对方颜色 */
   const opposite = (color) => (color === 'white' ? 'black' : 'white');
 
+  /**
+   * 深拷贝棋盘（避免引用污染）
+   * @param {Array} board - 当前棋盘数组
+   * @returns {Array} 深拷贝后的棋盘
+   */
   function cloneBoard(board) {
     return board.map((row) => row.map((cell) => (cell ? { type: cell.type, color: cell.color } : null)));
   }
 
+  /**
+   * 判断指定格子是否被某方棋子攻击
+   * @param {Array} board - 棋盘
+   * @param {number} r - 行
+   * @param {number} c - 列
+   * @param {string} byColor - 攻击方颜色
+   * @returns {boolean} 是否被攻击
+   */
   function isSquareAttacked(board, r, c, byColor) {
     const pawnRow = byColor === 'white' ? r + 1 : r - 1;
     if (inBounds(pawnRow, c - 1)) {
@@ -549,6 +605,12 @@ const Chess = (function() {
     return false;
   }
 
+  /**
+   * 在棋盘上查找指定颜色的王的位置
+   * @param {Array} board - 棋盘
+   * @param {string} color - 颜色
+   * @returns {{r:number,c:number}|null} 王的位置
+   */
   function findKing(board, color) {
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
@@ -559,12 +621,26 @@ const Chess = (function() {
     return null;
   }
 
+  /**
+   * 判断指定颜色是否处于被将军状态
+   * @param {Array} board - 棋盘
+   * @param {string} color - 颜色
+   * @returns {boolean} 是否被将军
+   */
   function isInCheck(board, color) {
     const king = findKing(board, color);
     if (!king) return false;
     return isSquareAttacked(board, king.r, king.c, opposite(color));
   }
 
+  /**
+   * 计算伪合法走法（不含将军检测）
+   * @param {Array} board - 棋盘
+   * @param {number} r - 行
+   * @param {number} c - 列
+   * @param {Object} state - 规则状态（易位权、过路兵目标）
+   * @returns {Array} 伪合法走法列表
+   */
   function getPseudoLegalMoves(board, r, c, state) {
     const piece = board[r][c];
     if (!piece) return [];
@@ -655,6 +731,14 @@ const Chess = (function() {
     return moves;
   }
 
+  /**
+   * 应用走法到棋盘，返回新棋盘及状态
+   * @param {Array} board - 当前棋盘
+   * @param {Object} move - 走法对象
+   * @param {Object} state - 当前规则状态
+   * @param {string} [promotionPiece] - 升变目标棋子类型
+   * @returns {{board:Array, newState:Object, captured:Object|null, isPromotion:boolean}}
+   */
   function applyMove(board, move, state, promotionPiece) {
     const newBoard = cloneBoard(board);
     const piece = newBoard[move.from.r][move.from.c];
@@ -719,6 +803,14 @@ const Chess = (function() {
     };
   }
 
+  /**
+   * 计算合法走法（过滤掉导致被将军的走法）
+   * @param {Array} board - 棋盘
+   * @param {number} r - 行
+   * @param {number} c - 列
+   * @param {Object} state - 规则状态
+   * @returns {Array} 合法走法列表
+   */
   function getLegalMoves(board, r, c, state) {
     const piece = board[r][c];
     if (!piece) return [];
@@ -742,6 +834,13 @@ const Chess = (function() {
     return legal;
   }
 
+  /**
+   * 判断某方是否还有合法走法
+   * @param {Array} board - 棋盘
+   * @param {string} color - 颜色
+   * @param {Object} state - 规则状态
+   * @returns {boolean} 是否还有合法走法
+   */
   function hasAnyLegalMove(board, color, state) {
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
@@ -754,14 +853,33 @@ const Chess = (function() {
     return false;
   }
 
+  /**
+   * 判断是否将杀
+   * @param {Array} board - 棋盘
+   * @param {string} color - 被将军方
+   * @param {Object} state - 规则状态
+   * @returns {boolean} 是否将杀
+   */
   function isCheckmate(board, color, state) {
     return isInCheck(board, color) && !hasAnyLegalMove(board, color, state);
   }
 
+  /**
+   * 判断是否逼和
+   * @param {Array} board - 棋盘
+   * @param {string} color - 当前走棋方
+   * @param {Object} state - 规则状态
+   * @returns {boolean} 是否逼和
+   */
   function isStalemate(board, color, state) {
     return !isInCheck(board, color) && !hasAnyLegalMove(board, color, state);
   }
 
+  /**
+   * 判断是否子力不足（单王、王+象/马等无法将杀情况）
+   * @param {Array} board - 棋盘
+   * @returns {boolean} 是否子力不足
+   */
   function isInsufficientMaterial(board) {
     const white = [];
     const black = [];
@@ -785,6 +903,10 @@ const Chess = (function() {
     return false;
   }
 
+  /**
+   * 创建国际象棋初始棋盘布局
+   * @returns {Array} 初始棋盘 8x8 数组
+   */
   function initialBoard() {
     const board = Array.from({ length: 8 }, () => Array(8).fill(null));
     const backRank = ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'];
@@ -802,27 +924,45 @@ const Chess = (function() {
 
 // === 中国象棋规则引擎（前端本地版，与 src/xiangqi.js 同源） ===
 const Xiangqi = (function() {
-  const ROWS = 10, COLS = 9;
-  const ROOK_DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+  const ROWS = 10, COLS = 9;                              // 棋盘行数/列数
+  const ROOK_DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]];  // 车/炮走法方向
+  // 九宫范围（红方在下，黑方在上）
   const PALACE = {
     red: { rowMin: 7, rowMax: 9, colMin: 3, colMax: 5 },
     black: { rowMin: 0, rowMax: 2, colMin: 3, colMax: 5 },
   };
-  const RIVER_ROW = 4;
+  const RIVER_ROW = 4;  // 楚河汉界所在行（红方半场起点）
+  /** 检查坐标是否在棋盘内 */
   const inBounds = (r, c) => r >= 0 && r < ROWS && c >= 0 && c < COLS;
+  /** 返回对方颜色 */
   const opposite = (color) => (color === 'red' ? 'black' : 'red');
+  /** 判断坐标是否在己方九宫内 */
   const inPalace = (r, c, color) => {
     const p = PALACE[color];
     return r >= p.rowMin && r <= p.rowMax && c >= p.colMin && c <= p.colMax;
   };
+  /** 判断坐标是否在己方半场 */
   const inOwnHalf = (r, color) => (color === 'red' ? r >= 5 : r <= 4);
+  /** 红兵是否已过河 */
   const isRedPawnCrossed = (r) => r <= RIVER_ROW;
+  /** 黑卒是否已过河 */
   const isBlackPawnCrossed = (r) => r >= RIVER_ROW + 1;
 
+  /**
+   * 深拷贝棋盘
+   * @param {Array} board - 棋盘
+   * @returns {Array} 拷贝后的棋盘
+   */
   function cloneBoard(board) {
     return board.map((row) => row.map((cell) => (cell ? { type: cell.type, color: cell.color } : null)));
   }
 
+  /**
+   * 查找指定颜色的将/帅位置
+   * @param {Array} board - 棋盘
+   * @param {string} color - 颜色
+   * @returns {{r:number,c:number}|null} 将/帅位置
+   */
   function findGeneral(board, color) {
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
@@ -833,6 +973,14 @@ const Xiangqi = (function() {
     return null;
   }
 
+  /**
+   * 判断指定格子是否被某方棋子攻击
+   * @param {Array} board - 棋盘
+   * @param {number} r - 行
+   * @param {number} c - 列
+   * @param {string} byColor - 攻击方颜色
+   * @returns {boolean} 是否被攻击
+   */
   function isSquareAttacked(board, r, c, byColor) {
     for (const [dr, dc] of ROOK_DIRS) {
       let nr = r + dr, nc = c + dc;
@@ -851,6 +999,7 @@ const Xiangqi = (function() {
         nr += dr; nc += dc;
       }
     }
+    // 马走法：先判断蹩脚腿，再判断目标位置
     const knightAttacks = [
       { legOffset: [-1, -1], knightOffset: [-2, -1] },
       { legOffset: [-1, 1], knightOffset: [-2, 1] },
@@ -904,6 +1053,12 @@ const Xiangqi = (function() {
     return false;
   }
 
+  /**
+   * 判断指定颜色是否被将军
+   * @param {Array} board - 棋盘
+   * @param {string} color - 颜色
+   * @returns {boolean} 是否被将军
+   */
   function isInCheck(board, color) {
     const general = findGeneral(board, color);
     if (!general) return false;
@@ -922,6 +1077,14 @@ const Xiangqi = (function() {
     return false;
   }
 
+  /**
+   * 计算伪合法走法（不含将军检测）
+   * @param {Array} board - 棋盘
+   * @param {number} r - 行
+   * @param {number} c - 列
+   * @param {Object} state - 规则状态
+   * @returns {Array} 走法列表
+   */
   function getPseudoLegalMoves(board, r, c, state) {
     const piece = board[r][c];
     if (!piece) return [];
@@ -1033,6 +1196,13 @@ const Xiangqi = (function() {
     return moves;
   }
 
+  /**
+   * 应用走法到棋盘，返回新棋盘及状态
+   * @param {Array} board - 当前棋盘
+   * @param {Object} move - 走法对象
+   * @param {Object} state - 当前规则状态
+   * @returns {{board:Array, newState:Object, captured:Object|null}}
+   */
   function applyMove(board, move, state) {
     const newBoard = cloneBoard(board);
     const piece = newBoard[move.from.r][move.from.c];
@@ -1045,6 +1215,14 @@ const Xiangqi = (function() {
     return { board: newBoard, newState: state, captured };
   }
 
+  /**
+   * 计算合法走法（过滤掉导致被将军的走法）
+   * @param {Array} board - 棋盘
+   * @param {number} r - 行
+   * @param {number} c - 列
+   * @param {Object} state - 规则状态
+   * @returns {Array} 合法走法列表
+   */
   function getLegalMoves(board, r, c, state) {
     const piece = board[r][c];
     if (!piece) return [];
@@ -1058,6 +1236,13 @@ const Xiangqi = (function() {
     return legal;
   }
 
+  /**
+   * 判断某方是否还有合法走法
+   * @param {Array} board - 棋盘
+   * @param {string} color - 颜色
+   * @param {Object} state - 规则状态
+   * @returns {boolean} 是否还有合法走法
+   */
   function hasAnyLegalMove(board, color, state) {
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
@@ -1070,14 +1255,32 @@ const Xiangqi = (function() {
     return false;
   }
 
+  /**
+   * 判断是否将杀
+   * @param {Array} board - 棋盘
+   * @param {string} color - 被将军方
+   * @param {Object} state - 规则状态
+   * @returns {boolean} 是否将杀
+   */
   function isCheckmate(board, color, state) {
     return isInCheck(board, color) && !hasAnyLegalMove(board, color, state);
   }
 
+  /**
+   * 判断是否困毙（中国象棋无逼和，困毙判负）
+   * @param {Array} board - 棋盘
+   * @param {string} color - 当前走棋方
+   * @param {Object} state - 规则状态
+   * @returns {boolean} 是否困毙
+   */
   function isStalemate(board, color, state) {
     return !isInCheck(board, color) && !hasAnyLegalMove(board, color, state);
   }
 
+  /**
+   * 创建中国象棋初始棋盘布局
+   * @returns {Array} 初始棋盘 10x9 数组
+   */
   function initialBoard() {
     const board = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
     const backRank = ['r', 'h', 'e', 'a', 'k', 'a', 'e', 'h', 'r'];
@@ -1099,7 +1302,12 @@ const Xiangqi = (function() {
   return { getLegalMoves, applyMove, isInCheck, hasAnyLegalMove, isCheckmate, isStalemate, initialBoard };
 })();
 
+// === 全局变量定义 ===
+
+// 五子棋盘尺寸：15x15
 const ROWS = 15, COLS = 15;
+
+// 国际象棋棋子 Unicode 字形映射（实心符号）
 const CHESS_GLYPHS = {
   // 白黑双方统一使用实心字形（U+265A..F），靠 CSS 颜色与描边区分，
   // 形状完全对称，避免空心字形在不同字体下细节缺失。
@@ -1115,55 +1323,90 @@ const XIANGQI_GLYPHS = {
 const CHESS_PIECE_NAMES = { k:'王', q:'后', r:'车', b:'象', n:'马', p:'兵' };
 const XIANGQI_PIECE_NAMES = { k:'将帅', a:'士', e:'象', h:'马', r:'车', c:'炮', p:'兵卒' };
 
+// 当前游戏类型：gomoku（五子棋）/ chess（国际象棋）/ xiangqi（中国象棋）
 let gameType = 'gomoku';
+// 我方颜色（五子棋：black/white；国际象棋：white/black；中国象棋：red/black）
 let myColor = null;
-let localMode = false; // 当面对战：纯客户端热座模式，无 WebSocket
+// 当面对战模式：纯客户端热座模式，无 WebSocket 通信
+let localMode = false;
+// 当前轮到谁走棋
 let currentTurn = 'black';
+// 游戏是否已结束
 let gameOver = false;
+// 是否和棋
 let draw = false;
+// WebSocket 连接实例
 let ws = null;
+// 当前房间 ID
 let roomId = '';
+// 五子棋棋盘数据（15x15，存储棋子颜色字符串）
 let boardData = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
+// 国际象棋棋盘数据与状态
 let chessBoardData = null;
-let chessState = null;       // 与服务端同步的规则状态（易位权、过路兵目标）
+// 规则状态：易位权、过路兵目标
+let chessState = null;
+// 当前选中的国际象棋棋子位置
 let chessSelected = null;
+// 当前选中棋子的合法走法列表
 let chessLegalMoves = [];
+// 是否翻转棋盘（黑方视角时翻转）
 let chessFlipped = false;
+// 中国象棋棋盘数据
 let xiangqiBoardData = null;
+// 中国象棋规则状态
 let xiangqiState = null;
+// 当前选中的中国象棋棋子位置
 let xiangqiSelected = null;
+// 当前选中棋子的合法走法列表
 let xiangqiLegalMoves = [];
+// 是否翻转棋盘（黑方视角时翻转）
 let xiangqiFlipped = false;
-let xiangqiCellRefs = null; // 缓存 90 个 cell DOM 引用，避免每次 render 全量重建
+// 缓存 90 个 cell DOM 引用，避免每次 render 全量重建
+let xiangqiCellRefs = null;
+// 上一步走法记录
 let lastMove = null;
+// 当前被将军的颜色
 let checkColor = null;
-let rematchRole = null; // 'requester' | 'accepter' | null
+// 再来一局角色：'requester'（请求方）| 'accepter'（接受方）| null
+let rematchRole = null;
+// 待处理的兵升变走法（用户选择升变类型后执行）
 let pendingPromotionMove = null;
-// 复盘：记录每一步的棋盘快照（含开局状态），复盘模式下按步渲染
+// 复盘历史记录：每一步的棋盘快照（含开局状态）
 let moveHistory = []; // [{ gameType, board, chessState, xiangqiState, lastMove, checkColor, currentTurn }]
+// 是否处于复盘模式
 let replaying = false;
+// 当前复盘步数索引
 let replayIndex = 0;
-// 模拟重下：在复盘基础上从当前步开始，本地轮流落子（不发送到服务端）
+// 模拟重下模式：在复盘基础上从当前步开始，本地轮流落子
 let simMode = false;
-let simColor = null; // 模拟重下下一手颜色（gomoku: black/white）
-let simMoves = []; // 模拟新增的走子记录（gomoku: {r,c,color}），退出时丢弃
+// 模拟重下下一手颜色（gomoku: black/white）
+let simColor = null;
+// 模拟新增的走子记录，退出时丢弃
+let simMoves = [];
+// "等一会"消息是否已收到对方确认
 var waitAckReceived = false;
 // 端到端加密状态（ECDH P-256 + AES-GCM）
-let myKeyPair = null;
-let sharedSecretKey = null;
-let peerKeyBase64 = null;
+let myKeyPair = null;       // 我方密钥对
+let sharedSecretKey = null; // 共享密钥
+let peerKeyBase64 = null;   // 对方公钥（Base64）
+// 待发送消息队列：密钥尚未建立时暂存，建立后自动发送
 let pendingChatQueue = [];
 // 待解密消息队列：密钥尚未建立时收到的密文暂存，密钥建立后批量解密
 let pendingDecryptQueue = [];
 // 聊天记录持久化：重连/刷新后从数组重建 DOM，避免消息丢失
 let chatHistory = [];
+// 聊天未读消息计数
 let chatUnread = 0;
+// 聊天面板是否获得焦点
 let chatFocused = true;
-// 是否允许断线重连：roomFull 等场景需禁用，避免无限重连循环
+// 是否允许断线重连（roomFull 等场景需禁用，避免无限重连循环）
 let shouldReconnect = true;
+// localStorage 键名：按房间号隔离聊天记录
 const CHAT_STORAGE_KEY = 'chatHistory_' + (new URLSearchParams(location.search).get('room') || '');
 
-// 从 localStorage 恢复聊天记录（页面刷新/关闭标签页后仍保留，跨会话持久化）
+/**
+ * 从 localStorage 恢复聊天记录（页面刷新/关闭标签页后仍保留，跨会话持久化）
+ */
 function loadChatHistory() {
   try {
     const raw = localStorage.getItem(CHAT_STORAGE_KEY);
@@ -1171,6 +1414,9 @@ function loadChatHistory() {
   } catch (e) { chatHistory = []; }
 }
 
+/**
+ * 保存聊天记录到 localStorage（仅保留最近 50 条，避免存储膨胀）
+ */
 function saveChatHistory() {
   try {
     // 仅保留最近 50 条，避免存储膨胀
@@ -1179,6 +1425,10 @@ function saveChatHistory() {
   } catch (e) {}
 }
 
+/**
+ * 生成随机房间 ID（6 位字母数字组合）
+ * @returns {string} 房间 ID
+ */
 function generateRoomId() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   let id = '';
@@ -1186,6 +1436,9 @@ function generateRoomId() {
   return id;
 }
 
+/**
+ * 应用初始化入口：解析 URL 参数，启动 WebSocket 或本地模式
+ */
 function init() {
   const params = new URLSearchParams(location.search);
   roomId = params.get('room');
@@ -1211,7 +1464,10 @@ function init() {
   renderChatHistory();
 }
 
-// === 当面对战（纯客户端热座模式）===
+/**
+ * 初始化当面对战（纯客户端热座模式）
+ * 隐藏仅在线模式相关的 UI，初始化棋盘状态，开始第一回合
+ */
 function initLocalGame() {
   // 隐藏仅在线模式有意义的 UI
   ['copyBtn', 'waitBtn', 'drawBtn', 'chatPanel', 'playerStatus'].forEach(function(id) {
@@ -1260,7 +1516,13 @@ function initLocalGame() {
   setStatus('轮到 ' + colorLabel(currentTurn));
 }
 
-// 客户端五子棋胜负判定（复制自 room.js checkWin）
+/**
+ * 五子棋胜负判定（检查五子连珠）
+ * @param {number} row - 落子行
+ * @param {number} col - 落子列
+ * @param {string} color - 落子颜色
+ * @returns {boolean} 是否获胜
+ */
 function checkGomokuWin(row, col, color) {
   const directions = [[1, 0], [0, 1], [1, 1], [1, -1]];
   for (const [dr, dc] of directions) {
@@ -1280,6 +1542,11 @@ function checkGomokuWin(row, col, color) {
   return false;
 }
 
+/**
+ * 本地五子棋走子：更新棋盘、判定胜负、切换回合
+ * @param {number} r - 行
+ * @param {number} c - 列
+ */
 function applyLocalGomokuMove(r, c) {
   if (gameOver || boardData[r][c]) return;
   const mover = currentTurn;
@@ -1301,6 +1568,11 @@ function applyLocalGomokuMove(r, c) {
   }
 }
 
+/**
+ * 本地国际象棋走子：验证合法性、应用走法、判定胜负/将军
+ * @param {Object} move - 走法对象
+ * @param {string} [promotionPiece] - 升变目标棋子类型
+ */
 function applyLocalChessMove(move, promotionPiece) {
   if (gameOver || !chessBoardData) return;
   const from = move.from, to = move.to;
@@ -1347,6 +1619,10 @@ function applyLocalChessMove(move, promotionPiece) {
   }
 }
 
+/**
+ * 本地中国象棋走子：验证合法性、应用走法、判定胜负/将军
+ * @param {Object} move - 走法对象
+ */
 function applyLocalXiangqiMove(move) {
   if (gameOver || !xiangqiBoardData) return;
   const from = move.from, to = move.to;
@@ -1387,6 +1663,11 @@ function applyLocalXiangqiMove(move) {
   }
 }
 
+/**
+ * 显示本地模式游戏结束弹窗
+ * @param {string|null} winner - 赢家颜色（null 表示和棋）
+ * @param {boolean} isDraw - 是否和棋
+ */
 function showLocalGameOver(winner, isDraw) {
   gameOver = true;
   draw = isDraw;
@@ -1412,6 +1693,9 @@ function showLocalGameOver(winner, isDraw) {
   if (drawWaitingEl) drawWaitingEl.classList.add('hidden');
 }
 
+/**
+ * 本地模式再来一局：切换棋种、重新初始化
+ */
 function localRematch() {
   var sel = document.getElementById('rematchGameSelect');
   if (sel) gameType = sel.value;
@@ -1420,6 +1704,9 @@ function localRematch() {
   initLocalGame();
 }
 
+/**
+ * 构建棋盘 DOM：根据当前游戏类型渲染对应棋盘
+ */
 function buildBoard() {
   const boardEl = document.getElementById('board');
   boardEl.innerHTML = '';
@@ -1437,6 +1724,9 @@ function buildBoard() {
   }
 }
 
+/**
+ * 构建五子棋棋盘网格（15x15），绑定点击、悬停事件
+ */
 function buildGomokuBoard() {
   const grid = document.createElement('div');
   grid.className = 'board-grid';
@@ -1455,16 +1745,28 @@ function buildGomokuBoard() {
   document.getElementById('board').appendChild(grid);
 }
 
+/**
+ * 渲染当前游戏类型的棋盘（重绘）
+ */
 function renderBoard() {
   if (gameType === 'chess') renderChess();
   else if (gameType === 'xiangqi') renderXiangqi();
   else renderGomoku();
 }
 
+/**
+ * 获取五子棋棋盘指定格子的 DOM 元素
+ * @param {number} r - 行
+ * @param {number} c - 列
+ * @returns {Element|null} 格子 DOM 元素
+ */
 function getCell(r, c) {
   return document.querySelector('.cell[data-row="' + r + '"][data-col="' + c + '"]');
 }
 
+/**
+ * 渲染五子棋棋盘：更新所有格子的棋子显示
+ */
 function renderGomoku() {
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
@@ -1487,6 +1789,11 @@ function renderGomoku() {
   }
 }
 
+/**
+ * 五子棋格子点击处理：落子（在线/本地/复盘/模拟重下）
+ * @param {number} r - 行
+ * @param {number} c - 列
+ */
 function onGomokuCellClick(r, c) {
   // 复盘模式下：点击空格直接进入模拟重下并落子
   if (replaying && !simMode) {
@@ -1503,6 +1810,12 @@ function onGomokuCellClick(r, c) {
   ws.send(JSON.stringify({ type: 'move', row: r, col: c }));
 }
 
+/**
+ * 五子棋格子悬停：显示预览落子
+ * @param {number} r - 行
+ * @param {number} c - 列
+ * @param {Element} cell - 格子 DOM 元素
+ */
 function onCellHover(r, c, cell) {
   if (gameOver || !myColor || myColor !== currentTurn) return;
   if (boardData[r][c]) return;
@@ -1512,11 +1825,18 @@ function onCellHover(r, c, cell) {
   cell.appendChild(preview);
 }
 
+/**
+ * 五子棋格子离开：移除预览落子
+ * @param {Element} cell - 格子 DOM 元素
+ */
 function onCellLeave(cell) {
   const preview = cell.querySelector('.preview');
   if (preview) preview.remove();
 }
 
+/**
+ * 渲染国际象棋棋盘：全量重建 8x8 网格，包含棋子、选中态、合法走法提示、坐标标签
+ */
 function renderChess() {
   const boardEl = document.getElementById('board');
   boardEl.innerHTML = '';
@@ -1595,6 +1915,11 @@ function renderChess() {
   boardEl.appendChild(grid);
 }
 
+/**
+ * 国际象棋格子点击处理：选中棋子/走子/取消选中
+ * @param {number} r - 行
+ * @param {number} c - 列
+ */
 function onChessCellClick(r, c) {
   if (gameOver || !myColor || myColor !== currentTurn) return;
   if (!chessBoardData) return;
@@ -1641,11 +1966,19 @@ function onChessCellClick(r, c) {
   }
 }
 
+/**
+ * 显示兵升变选择弹窗
+ * @param {Object} move - 兵升变走法
+ */
 function showPromotionModal(move) {
   pendingPromotionMove = move;
   document.getElementById('promotionModal').classList.remove('hidden');
 }
 
+/**
+ * 选择升变棋子类型后执行走子
+ * @param {string} piece - 棋子类型（q/r/b/n）
+ */
 function choosePromotion(piece) {
   document.getElementById('promotionModal').classList.add('hidden');
   if (pendingPromotionMove) {
@@ -1655,6 +1988,11 @@ function choosePromotion(piece) {
   }
 }
 
+/**
+ * 发送国际象棋走子（在线模式发送 WebSocket，本地模式应用本地规则）
+ * @param {Object} move - 走法对象
+ * @param {string} [promotionPiece] - 升变棋子类型
+ */
 function sendChessMove(move, promotionPiece) {
   if (localMode) { applyLocalChessMove(move, promotionPiece); return; }
   if (!ws || ws.readyState !== 1) return;
@@ -1667,9 +2005,9 @@ function sendChessMove(move, promotionPiece) {
   renderChess();
 }
 
-// === 中国象棋渲染与交互 ===
-// 为降低走棋卡顿，DOM 只在首次/翻转/重建时构建一次，
-// 后续选中/取消选中只更新 cell 的 class 与子元素，避免 90 个节点全量重建。
+/**
+ * 渲染中国象棋棋盘：增量更新，仅更新 class 与子元素内容，不重建 DOM
+ */
 function renderXiangqi() {
   const boardEl = document.getElementById('board');
   const needRebuild = !xiangqiCellRefs || boardEl.querySelector('.xiangqi-grid') !== xiangqiCellRefs._grid;
@@ -1677,8 +2015,11 @@ function renderXiangqi() {
   updateXiangqiCells();
 }
 
-// 首次构建棋盘 DOM：grid + 90 cell + 楚河汉界 + 九宫斜线 SVG。
-// cell 引用缓存到 xiangqiCellRefs[r][c]，事件委托到 grid 上，避免 90 个 listener。
+/**
+ * 首次构建中国象棋棋盘 DOM：grid + 90 cell + 楚河汉界 + 九宫斜线 SVG。
+ * cell 引用缓存到 xiangqiCellRefs，事件委托到 grid 上
+ * @param {Element} boardEl - 棋盘容器元素
+ */
 function buildXiangqiDOM(boardEl) {
   boardEl.innerHTML = '';
   const grid = document.createElement('div');
@@ -1837,7 +2178,9 @@ function buildXiangqiDOM(boardEl) {
   boardEl.appendChild(grid);
 }
 
-// 增量更新：仅修改 class 与子元素内容，不重建 DOM。
+/**
+ * 增量更新中国象棋棋盘：仅修改 class 与子元素内容，不重建 DOM
+ */
 function updateXiangqiCells() {
   if (!xiangqiCellRefs) return;
   const legalByTo = new Map();
@@ -1891,6 +2234,11 @@ function updateXiangqiCells() {
   }
 }
 
+/**
+ * 中国象棋格子点击处理：选中棋子/走子/取消选中
+ * @param {number} r - 行
+ * @param {number} c - 列
+ */
 function onXiangqiCellClick(r, c) {
   if (gameOver || !myColor || myColor !== currentTurn) return;
   if (!xiangqiBoardData) return;
@@ -1920,6 +2268,10 @@ function onXiangqiCellClick(r, c) {
   }
 }
 
+/**
+ * 发送中国象棋走子（在线模式发送 WebSocket，本地模式应用本地规则）
+ * @param {Object} move - 走法对象
+ */
 function sendXiangqiMove(move) {
   if (localMode) { applyLocalXiangqiMove(move); return; }
   if (!ws || ws.readyState !== 1) return;
@@ -1930,6 +2282,11 @@ function sendXiangqiMove(move) {
   renderXiangqi();
 }
 
+/**
+ * 颜色名称映射
+ * @param {string} color - 颜色标识
+ * @returns {string} 中文颜色名称
+ */
 function colorLabel(color) {
   if (color === 'red') return '红棋';
   if (color === 'black') return '黑棋';
@@ -1937,6 +2294,9 @@ function colorLabel(color) {
   return color;
 }
 
+/**
+ * 更新页面头部信息：玩家颜色、回合状态
+ */
 function updateHeader() {
   const colorEl = document.getElementById('myColor');
   if (localMode) {
@@ -1954,7 +2314,10 @@ function updateHeader() {
 }
 
 // === 复盘 ===
-// 快照当前棋盘与相关状态（深拷贝，避免后续走子污染历史记录）
+/**
+ * 快照当前棋盘与相关状态（深拷贝，避免后续走子污染历史记录）
+ * @returns {Object} 状态快照
+ */
 function snapshotState() {
   let board;
   if (gameType === 'chess') board = chessBoardData;
@@ -1971,7 +2334,12 @@ function snapshotState() {
   };
 }
 
-// 浅比较两个棋盘是否相同（用于终局 sync 去重，避免重复记录最后一步）
+/**
+ * 浅比较两个棋盘是否相同（用于终局 sync 去重）
+ * @param {Array} a - 棋盘 A
+ * @param {Array} b - 棋盘 B
+ * @returns {boolean} 是否相同
+ */
 function boardsEqual(a, b) {
   if (!a || !b) return a === b;
   if (a.length !== b.length) return false;
@@ -1991,6 +2359,9 @@ function boardsEqual(a, b) {
   return true;
 }
 
+/**
+ * 进入复盘模式：从最后一步开始，显示复盘控制条
+ */
 function enterReview() {
   if (moveHistory.length < 2) { setStatus('暂无复盘数据'); return; }
   replaying = true;
@@ -2002,6 +2373,9 @@ function enterReview() {
   applyReviewSnapshot();
 }
 
+/**
+ * 退出复盘模式，恢复终局棋盘
+ */
 function exitReview() {
   replaying = false;
   exitSimMode();
@@ -2014,7 +2388,9 @@ function exitReview() {
   document.getElementById('resultOverlay').classList.remove('hidden');
 }
 
-// 仅隐藏复盘 UI（不恢复棋盘），用于新一局开始时清理
+/**
+ * 仅隐藏复盘 UI（不恢复棋盘），用于新一局开始时清理
+ */
 function exitReviewUI() {
   const bar = document.getElementById('reviewBar');
   if (bar) bar.classList.add('hidden');
@@ -2024,6 +2400,10 @@ function exitReviewUI() {
   clearCaptureNotice();
 }
 
+/**
+ * 复盘步进：前进或后退指定步数
+ * @param {number} delta - 步进量（正数前进，负数后退）
+ */
 function reviewStep(delta) {
   if (!replaying || moveHistory.length === 0) return;
   // 复盘导航前退出模拟重下模式，回到真实历史
@@ -2035,6 +2415,10 @@ function reviewStep(delta) {
   applyReviewSnapshot();
 }
 
+/**
+ * 复盘跳转到指定步数
+ * @param {number} target - 目标步数索引（-1 表示最后一步）
+ */
 function reviewGoto(target) {
   if (!replaying || moveHistory.length === 0) return;
   if (simMode) exitSimMode();
@@ -2042,7 +2426,9 @@ function reviewGoto(target) {
   applyReviewSnapshot();
 }
 
-// 将快照恢复到全局渲染状态并重绘（复盘模式下棋盘只读，不触发交互）
+/**
+ * 将快照恢复到全局渲染状态并重绘（复盘模式下棋盘只读）
+ */
 function applyReviewSnapshot() {
   const snap = moveHistory[replayIndex];
   if (!snap) return;
@@ -2056,6 +2442,10 @@ function applyReviewSnapshot() {
   updateReviewControls();
 }
 
+/**
+ * 从快照恢复全局状态变量
+ * @param {Object} snap - 状态快照
+ */
 function restoreFromSnapshot(snap) {
   gameType = snap.gameType;
   if (snap.gameType === 'chess') {
@@ -2072,6 +2462,9 @@ function restoreFromSnapshot(snap) {
   currentTurn = snap.currentTurn;
 }
 
+/**
+ * 更新复盘控制条的显示状态（步数、按钮可用性、模拟重下高亮）
+ */
 function updateReviewControls() {
   const total = moveHistory.length;
   const stepEl = document.getElementById('reviewStep');
@@ -2095,14 +2488,18 @@ function updateReviewControls() {
   if (simHint) simHint.classList.toggle('hidden', !simMode);
 }
 
-// === 模拟重下 ===
-// 在当前复盘位置基础上，本地轮流落子（仅五子棋：黑白轮流；国际象棋/中国象棋不支持模拟重下）
+/**
+ * 切换模拟重下模式开关
+ */
 function toggleSimMode() {
   if (!replaying) return;
   if (simMode) exitSimMode();
   else enterSimMode();
 }
 
+/**
+ * 进入模拟重下模式：从当前复盘快照开始，本地轮流落子
+ */
 function enterSimMode() {
   if (gameType !== 'gomoku') { setStatus('模拟重下仅支持五子棋'); return; }
   // 从当前复盘快照开始模拟：以快照的 currentTurn 作为下一手颜色
@@ -2117,6 +2514,9 @@ function enterSimMode() {
   setStatus('模拟重下中：点击棋盘轮流落子，再点「模拟重下」退出');
 }
 
+/**
+ * 退出模拟重下模式，恢复到当前复盘快照
+ */
 function exitSimMode() {
   if (!simMode) return;
   simMode = false;
@@ -2127,7 +2527,11 @@ function exitSimMode() {
   applyReviewSnapshot();
 }
 
-// 复盘+模拟重下模式下的棋盘点击处理（替代正常走子流程）
+/**
+ * 复盘+模拟重下模式下的棋盘点击处理
+ * @param {number} r - 行
+ * @param {number} c - 列
+ */
 function onSimCellClick(r, c) {
   if (!simMode || gameType !== 'gomoku') return;
   if (boardData[r] && boardData[r][c]) return; // 已有棋子
@@ -2139,8 +2543,9 @@ function onSimCellClick(r, c) {
   updateReviewControls();
 }
 
-// === 导出复盘为 HTML ===
-// 生成自包含 HTML（含所有快照与导航控件），可在任意浏览器离线打开复盘
+/**
+ * 导出复盘为自包含 HTML 文件（含所有快照与导航控件）
+ */
 function exportReviewHTML() {
   if (moveHistory.length < 2) { setStatus('暂无复盘数据可导出'); return; }
   // 序列化快照（含模拟重下合并到末尾的虚拟快照）
@@ -2218,9 +2623,13 @@ function exportReviewHTML() {
   }
 }
 
-// 构建自包含复盘 HTML（含内联 CSS + JS，快照内嵌为 JSON）
-// 注意：本函数位于外层 GAME_HTML 模板字符串内，不能使用换行转义或模板插值语法，
-// 改用 String.fromCharCode(10) 代替换行、占位符替换避免外层模板提前求值。
+/**
+ * 构建自包含复盘 HTML（含内联 CSS + JS，快照内嵌为 JSON）
+ * @param {Array} snaps - 快照数组
+ * @param {string} gameLabel - 游戏类型标签
+ * @param {string} dataJson - 序列化的快照 JSON 字符串
+ * @returns {string} 完整的 HTML 字符串
+ */
 function buildExportHTML(snaps, gameLabel, dataJson) {
   var N = String.fromCharCode(10);
   var css = [
@@ -2414,6 +2823,10 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
   return html.replace(/__GAME_LABEL__/g, gameLabel).replace(/__DATA_JSON__/g, dataJson);
 }
 
+/**
+ * 更新玩家状态显示（在线/离线、延迟信息）
+ * @param {Object} msg - 状态消息对象
+ */
 function updateStatus(msg) {
   document.getElementById('playerStatus').style.display = 'flex';
   var players = msg.players;
@@ -2443,13 +2856,22 @@ function updateStatus(msg) {
   });
 }
 
+/**
+ * 设置状态消息文字
+ * @param {string} msg - 消息内容
+ * @param {boolean} [isCheck] - 是否为将军提示
+ */
 function setStatus(msg, isCheck) {
   const el = document.getElementById('statusMsg');
   el.textContent = msg;
   if (isCheck) el.classList.add('check-msg'); else el.classList.remove('check-msg');
 }
 
-// 吃子提示：对方吃了我的棋子时，在棋盘顶部红字显示被吃棋子
+/**
+ * 显示吃子提示：对方吃了我的棋子时，在棋盘顶部红字显示
+ * @param {Object} piece - 被吃棋子
+ * @param {string} gt - 游戏类型
+ */
 function showCaptureNotice(piece, gt) {
   const el = document.getElementById('captureNotice');
   if (!el) return;
@@ -2464,16 +2886,25 @@ function showCaptureNotice(piece, gt) {
   el.innerHTML = '对方吃了你的 ' + name +
     (glyph ? ' <span class="capture-glyph">' + glyph + '</span>' : '');
 }
+/**
+ * 清除吃子提示
+ */
 function clearCaptureNotice() {
   var el = document.getElementById('captureNotice');
   if (el) el.innerHTML = '';
 }
 
+/**
+ * 设置再来一局选择框默认值
+ */
 function setRematchSelectDefaults() {
   document.getElementById('rematchGameSelect').value = gameType;
   document.getElementById('rematchHint').textContent = '';
 }
 
+/**
+ * 隐藏所有弹窗遮罩
+ */
 function hideAllModals() {
   document.getElementById('waitingOverlay').classList.add('hidden');
   document.getElementById('resultOverlay').classList.add('hidden');
@@ -2482,6 +2913,9 @@ function hideAllModals() {
   document.getElementById('promotionModal').classList.add('hidden');
 }
 
+/**
+ * 建立 WebSocket 连接并初始化消息处理
+ */
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(proto + '://' + location.host + '/ws?room=' + roomId + '&game=' + gameType);
@@ -2811,6 +3245,9 @@ function connect() {
   ws.onerror = () => {};
 }
 
+/**
+ * 请求再来一局：向服务端发送重赛请求并显示等待界面
+ */
 function requestRematch() {
   if (localMode) { localRematch(); return; }
   if (ws && ws.readyState === 1) {
@@ -2823,6 +3260,9 @@ function requestRematch() {
   }
 }
 
+/**
+ * 接受对方的再来一局请求
+ */
 function acceptRematch() {
   if (ws && ws.readyState === 1) {
     rematchRole = 'accepter';
@@ -2834,6 +3274,9 @@ function acceptRematch() {
   }
 }
 
+/**
+ * 拒绝对方的再来一局请求
+ */
 function declineRematch() {
   if (ws && ws.readyState === 1) {
     ws.send(JSON.stringify({ type: 'rematchDecline' }));
@@ -2845,6 +3288,9 @@ function declineRematch() {
   }
 }
 
+/**
+ * 取消自己发起的再来一局请求
+ */
 function cancelRematch() {
   if (ws && ws.readyState === 1) {
     ws.send(JSON.stringify({ type: 'rematchDecline' }));
@@ -2854,6 +3300,9 @@ function cancelRematch() {
   }
 }
 
+/**
+ * 发送"请等一会"通知给对方
+ */
 function sendWaitNotice() {
   if (ws && ws.readyState === 1) {
     ws.send(JSON.stringify({ type: 'waitNotice' }));
@@ -2878,6 +3327,10 @@ function sendWaitNotice() {
   }
 }
 
+/**
+ * 显示"请等一会"通知弹窗，含"收到"确认按钮
+ * @param {string} text - 通知消息内容
+ */
 function showWaitNotice(text) {
   var existing = document.getElementById('waitNoticeOverlay');
   if (existing) existing.remove();
@@ -2900,7 +3353,10 @@ function showWaitNotice(text) {
   document.body.appendChild(el);
 }
 
-// 复盘模式下的重赛请求顶部弹窗（非全屏，不遮挡复盘界面）
+/**
+ * 复盘模式下的重赛请求顶部弹窗（非全屏，不遮挡复盘界面）
+ * @param {string} text - 提示消息文本
+ */
 function showRematchNotice(text) {
   hideRematchNotice();
   var el = document.createElement('div');
@@ -2924,12 +3380,18 @@ function showRematchNotice(text) {
   document.body.appendChild(el);
 }
 
+/**
+ * 隐藏复盘模式下的重赛请求弹窗
+ */
 function hideRematchNotice() {
   var el = document.getElementById('rematchNoticeOverlay');
   if (el) el.remove();
 }
 
 // === 求和（和棋请求） ===
+/**
+ * 向对方发起和棋请求
+ */
 function sendDrawOffer() {
   if (gameOver) return;
   if (ws && ws.readyState === 1) {
@@ -2938,6 +3400,9 @@ function sendDrawOffer() {
   }
 }
 
+/**
+ * 接受对方的和棋请求
+ */
 function acceptDraw() {
   if (ws && ws.readyState === 1) {
     ws.send(JSON.stringify({ type: 'drawAccept' }));
@@ -2945,6 +3410,9 @@ function acceptDraw() {
   document.getElementById('drawModal').classList.add('hidden');
 }
 
+/**
+ * 拒绝对方的和棋请求
+ */
 function declineDraw() {
   if (ws && ws.readyState === 1) {
     ws.send(JSON.stringify({ type: 'drawDecline' }));
@@ -2952,6 +3420,9 @@ function declineDraw() {
   document.getElementById('drawModal').classList.add('hidden');
 }
 
+/**
+ * 取消自己发起的和棋请求
+ */
 function cancelDraw() {
   // 取消等同于拒绝（对方若已收到请求，会收到 decline）
   if (ws && ws.readyState === 1) {
@@ -2960,6 +3431,10 @@ function cancelDraw() {
   document.getElementById('drawWaiting').classList.add('hidden');
 }
 
+/**
+ * 复制房间链接到剪贴板（优先使用 Clipboard API，回退到 execCommand）
+ * @param {string} [btnId] - 按钮元素的 ID
+ */
 function copyLink(btnId) {
   var url = location.href;
   var btn = document.getElementById(btnId || 'copyBtn');
@@ -2994,12 +3469,24 @@ function copyLink(btnId) {
 
 // === 端到端加密（ECDH P-256 派生共享密钥 + AES-GCM 加密） ===
 // 服务端只转发公钥与密文，无法解密聊天内容。重连时重新协商密钥。
+
+/**
+ * 将 ArrayBuffer 编码为 Base64 字符串
+ * @param {ArrayBuffer} buf - 二进制数据
+ * @returns {string} Base64 编码字符串
+ */
 function arrayBufferToBase64(buf) {
   const bytes = new Uint8Array(buf);
   let bin = '';
   for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
   return btoa(bin);
 }
+
+/**
+ * 将 Base64 字符串解码为 ArrayBuffer
+ * @param {string} b64 - Base64 编码字符串
+ * @returns {ArrayBuffer} 解码后的二进制数据
+ */
 function base64ToArrayBuffer(b64) {
   const bin = atob(b64);
   const bytes = new Uint8Array(bin.length);
@@ -3007,6 +3494,10 @@ function base64ToArrayBuffer(b64) {
   return bytes.buffer;
 }
 
+/**
+ * 初始化 ECDH 加密通道：生成密钥对并发送公钥
+ * 重连时重置旧密钥，用新公钥重新协商
+ */
 async function initEncryption() {
   // 重连时重置：旧共享密钥已失效，需用新公钥重新协商
   sharedSecretKey = null;
@@ -3026,6 +3517,11 @@ async function initEncryption() {
   }
 }
 
+/**
+ * 收到对方公钥后派生共享密钥，并处理排队消息
+ * 仅在公钥变化时重新派生，避免互相重发形成死循环
+ * @param {string} newKeyBase64 - 对方公钥的 Base64 编码
+ */
 async function onPeerPubKey(newKeyBase64) {
   if (!window.crypto || !crypto.subtle || !myKeyPair) return;
   // 仅在公钥变化时重新派生（断开重连或首次交换），同时避免双方互相重发形成死循环
@@ -3061,6 +3557,11 @@ async function onPeerPubKey(newKeyBase64) {
   }
 }
 
+/**
+ * 加密并发送聊天消息（本地立即显示，降低感知延迟）
+ * @param {string} text - 消息文本
+ * @param {boolean} [skipLocalDisplay] - 是否跳过本地显示（重发排队消息时避免重复显示）
+ */
 async function sendChatEncrypted(text, skipLocalDisplay) {
   // 发送方本地立即显示，无需等服务端回环，降低感知延迟
   if (!skipLocalDisplay) appendChatMessage(myColor, text, Date.now());
@@ -3096,6 +3597,12 @@ async function sendChatEncrypted(text, skipLocalDisplay) {
   }
 }
 
+/**
+ * 使用 AES-GCM 解密聊天消息
+ * @param {string} ivBase64 - 初始化向量的 Base64 编码
+ * @param {string} ctBase64 - 密文的 Base64 编码
+ * @returns {Promise<string|null>} 解密后的明文，失败返回 null
+ */
 async function decryptChat(ivBase64, ctBase64) {
   if (!sharedSecretKey) return null;
   try {
@@ -3110,6 +3617,10 @@ async function decryptChat(ivBase64, ctBase64) {
 }
 
 // === 聊天室 ===
+
+/**
+ * 初始化聊天面板：绑定表单提交、折叠/展开、未读标记等事件
+ */
 function setupChat() {
   const form = document.getElementById('chatForm');
   const input = document.getElementById('chatInput');
@@ -3150,7 +3661,9 @@ function setupChat() {
   window.addEventListener('focus', markRead);
 }
 
-// 重建聊天 DOM（重连或首次渲染时从 chatHistory 恢复）
+/**
+ * 重建聊天 DOM（重连或首次渲染时从 chatHistory 恢复）
+ */
 function renderChatHistory() {
   const box = document.getElementById('chatMessages');
   if (!box) return;
@@ -3162,6 +3675,12 @@ function renderChatHistory() {
   box.scrollTop = box.scrollHeight;
 }
 
+/**
+ * 创建聊天消息 DOM 元素（含玩家名和消息内容）
+ * @param {string} color - 玩家颜色
+ * @param {string} text - 消息文本
+ * @returns {HTMLElement} 聊天消息元素
+ */
 function createChatMsgEl(color, text) {
   const msg = document.createElement('div');
   msg.className = 'chat-msg';
@@ -3176,6 +3695,11 @@ function createChatMsgEl(color, text) {
   return msg;
 }
 
+/**
+ * 创建系统消息 DOM 元素
+ * @param {string} text - 系统消息文本
+ * @returns {HTMLElement} 系统消息元素
+ */
 function createSystemMsgEl(text) {
   const msg = document.createElement('div');
   msg.className = 'chat-msg sys';
@@ -3183,6 +3707,12 @@ function createSystemMsgEl(text) {
   return msg;
 }
 
+/**
+ * 追加聊天消息到历史记录和 DOM，自动滚动到底部并计未读
+ * @param {string} color - 发送方颜色
+ * @param {string} text - 消息文本
+ * @param {number} ts - 时间戳
+ */
 function appendChatMessage(color, text, ts) {
   chatHistory.push({ color, text, ts });
   if (chatHistory.length > 200) chatHistory.shift();
@@ -3197,6 +3727,10 @@ function appendChatMessage(color, text, ts) {
   if (color !== myColor) incrementUnread();
 }
 
+/**
+ * 追加系统消息到聊天记录
+ * @param {string} text - 系统消息文本
+ */
 function appendSystemMessage(text) {
   chatHistory.push({ sys: true, text });
   if (chatHistory.length > 200) chatHistory.shift();
@@ -3207,6 +3741,9 @@ function appendSystemMessage(text) {
   box.scrollTop = box.scrollHeight;
 }
 
+/**
+ * 增加未读计数（仅在折叠状态或窗口未聚焦时计入）
+ */
 function incrementUnread() {
   // 折叠状态或窗口未聚焦时计入未读
   const panel = document.getElementById('chatPanel');
@@ -3216,6 +3753,9 @@ function incrementUnread() {
   updateChatBadge();
 }
 
+/**
+ * 更新聊天未读徽章显示
+ */
 function updateChatBadge() {
   const badge = document.getElementById('chatBadge');
   if (!badge) return;
@@ -3227,7 +3767,10 @@ function updateChatBadge() {
   }
 }
 
-// 更新对方在线/离线状态指示
+/**
+ * 更新对方在线/离线状态指示
+ * @param {boolean} online - 是否在线
+ */
 function setPeerOnline(online) {
   const el = document.getElementById('chatPeerStatus');
   if (!el) return;
