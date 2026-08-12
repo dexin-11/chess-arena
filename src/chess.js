@@ -3,22 +3,41 @@
 // 每格为 null（空）或 { type: 'k'|'q'|'r'|'b'|'n'|'p', color: 'white'|'black' }。
 // 可同时用于 Cloudflare Worker Durable Object 服务端与浏览器端。
 
-// 滑动方向常量
+// 滑动方向常量：车沿横竖四个方向移动
 const ROOK_DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+// 滑动方向常量：象沿对角线四个方向移动
 const BISHOP_DIRS = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+// 王走法偏移：八个方向各一步
 const KING_DIRS = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
+// 马走法偏移：L 形八种跳法（行偏移, 列偏移）
 const KNIGHT_DELTAS = [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]];
 
-// 各色车在初始格的映射，用于易位权更新："行,列" -> 侧别
+// 各色车在初始格的映射，用于易位权更新："行,列" -> 侧别（'k'=王翼, 'q'=后翼）
 const ROOK_ORIGINS = {
   white: { '7,0': 'q', '7,7': 'k' },
   black: { '0,0': 'q', '0,7': 'k' },
 };
 
+/**
+ * 判断坐标是否在棋盘范围内（0-7）。
+ * @param {number} r - 行
+ * @param {number} c - 列
+ * @returns {boolean}
+ */
 const inBounds = (r, c) => r >= 0 && r < 8 && c >= 0 && c < 8;
+
+/**
+ * 返回对方颜色。
+ * @param {'white'|'black'} color
+ * @returns {'white'|'black'}
+ */
 const opposite = (color) => (color === 'white' ? 'black' : 'white');
 
-// 生成标准起始局面：白方在 row 6/7，黑方在 row 0/1，底线顺序 r,n,b,q,k,b,n,r。
+/**
+ * 生成标准起始局面。
+ * 白方在 row 6/7，黑方在 row 0/1，底线顺序 r,n,b,q,k,b,n,r。
+ * @returns {Array<Array<{type: string, color: string}|null>>} 8x8 棋盘数组
+ */
 export function initialBoard() {
   const board = Array.from({ length: 8 }, () => Array(8).fill(null));
   const backRank = ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'];
@@ -31,12 +50,24 @@ export function initialBoard() {
   return board;
 }
 
-// 深拷贝棋盘，避免外部修改影响内部状态。
+/**
+ * 深拷贝棋盘，避免外部修改影响内部状态。
+ * @param {Array<Array<{type: string, color: string}|null>>} board - 原棋盘
+ * @returns {Array<Array<{type: string, color: string}|null>>} 新棋盘副本
+ */
 export function cloneBoard(board) {
   return board.map((row) => row.map((cell) => (cell ? { type: cell.type, color: cell.color } : null)));
 }
 
-// 判断 byColor 方是否有棋子以基础走法攻击 (r,c)。不含王车易位、不含兵直走（兵只斜吃）。
+/**
+ * 判断 byColor 方是否有棋子以基础走法攻击 (r,c)。
+ * 不含王车易位、不含兵直走（兵只斜吃）。
+ * @param {Array<Array<{type: string, color: string}|null>>} board - 棋盘
+ * @param {number} r - 目标行
+ * @param {number} c - 目标列
+ * @param {'white'|'black'} byColor - 攻击方颜色
+ * @returns {boolean} 是否被攻击
+ */
 export function isSquareAttacked(board, r, c, byColor) {
   // 兵的斜向攻击：白兵向上吃，故攻击 (r,c) 的白兵位于 (r+1, c±1)；黑兵反之。
   const pawnRow = byColor === 'white' ? r + 1 : r - 1;
@@ -96,7 +127,12 @@ export function isSquareAttacked(board, r, c, byColor) {
   return false;
 }
 
-// 查找指定色王的位置，找不到返回 null。
+/**
+ * 查找指定色王的位置。
+ * @param {Array<Array<{type: string, color: string}|null>>} board - 棋盘
+ * @param {'white'|'black'} color - 要查找的颜色
+ * @returns {{r: number, c: number}|null} 王的位置，找不到返回 null
+ */
 export function findKing(board, color) {
   for (let r = 0; r < 8; r++) {
     for (let c = 0; c < 8; c++) {
@@ -107,15 +143,27 @@ export function findKing(board, color) {
   return null;
 }
 
-// 判断 color 方王是否被将军。
+/**
+ * 判断 color 方王是否被将军。
+ * @param {Array<Array<{type: string, color: string}|null>>} board - 棋盘
+ * @param {'white'|'black'} color - 要检查的颜色
+ * @returns {boolean}
+ */
 export function isInCheck(board, color) {
   const king = findKing(board, color);
   if (!king) return false;
   return isSquareAttacked(board, king.r, king.c, opposite(color));
 }
 
-// 生成伪合法走法（不检测走完后己方王是否被将军）。
-// state: { castlingRights: {white:{k,q},black:{k,q}}, enPassantTarget: {r,c}|null }
+/**
+ * 生成伪合法走法（不检测走完后己方王是否被将军）。
+ * 之所以叫"伪合法"，是因为还需过滤掉导致己方被将军的走法后才算"合法"。
+ * @param {Array<Array<{type: string, color: string}|null>>} board - 棋盘
+ * @param {number} r - 棋子行坐标
+ * @param {number} c - 棋子列坐标
+ * @param {{castlingRights: {white: {k: boolean, q: boolean}, black: {k: boolean, q: boolean}}, enPassantTarget: {r: number, c: number}|null}} state - 游戏状态（含易位权与过路兵目标格）
+ * @returns {Array<{from: {r: number, c: number}, to: {r: number, c: number}, special?: string}>} 走法列表
+ */
 export function getPseudoLegalMoves(board, r, c, state) {
   const piece = board[r][c];
   if (!piece) return [];
@@ -123,7 +171,12 @@ export function getPseudoLegalMoves(board, r, c, state) {
   const opponent = opposite(color);
   const moves = [];
 
-  // 添加一个普通走法（自动跳过越界与己方棋子格）
+  /**
+   * 添加一个普通走法到走法列表（自动跳过越界与己方棋子格）。
+   * @param {number} tr - 目标行
+   * @param {number} tc - 目标列
+   * @param {string} [special] - 特殊走法类型标识（如 'promotion'/'enpassant'/'castle-kingside'/'castle-queenside'）
+   */
   const add = (tr, tc, special) => {
     if (!inBounds(tr, tc)) return;
     const target = board[tr][tc];
@@ -224,7 +277,14 @@ export function getPseudoLegalMoves(board, r, c, state) {
   return moves;
 }
 
-// 应用一步走法，返回新棋盘、新状态与被吃棋子。不修改入参。
+/**
+ * 应用一步走法，返回新棋盘、新状态与被吃棋子。不修改入参（纯函数）。
+ * @param {Array<Array<{type: string, color: string}|null>>} board - 原棋盘
+ * @param {{from: {r: number, c: number}, to: {r: number, c: number}, special?: string}} move - 走法
+ * @param {{castlingRights: {white: {k: boolean, q: boolean}, black: {k: boolean, q: boolean}}, enPassantTarget: {r: number, c: number}|null}} state - 当前游戏状态
+ * @param {string} [promotionPiece] - 升变时选择的棋子类型，默认 'q'（后）
+ * @returns {{board: Array, newState: object, captured: object|null, isPromotion: boolean}} 新棋盘、新状态、被吃棋子、是否升变
+ */
 export function applyMove(board, move, state, promotionPiece) {
   const newBoard = cloneBoard(board);
   const piece = newBoard[move.from.r][move.from.c];
@@ -265,7 +325,7 @@ export function applyMove(board, move, state, promotionPiece) {
     newBoard[row][0] = null;
   }
 
-  // 兺升变与双步过路兵目标
+  // 兵升变与双步过路兵目标
   if (piece.type === 'p') {
     const lastRow = color === 'white' ? 0 : 7;
     if (move.to.r === lastRow) {
@@ -302,7 +362,15 @@ export function applyMove(board, move, state, promotionPiece) {
   };
 }
 
-// 生成合法走法：过滤走完后己方王被将军的走法；易位额外校验路径格不被攻击。
+/**
+ * 生成合法走法：在伪合法走法基础上，过滤走完后己方王被将军的走法；
+ * 易位额外校验路径格不被攻击。
+ * @param {Array<Array<{type: string, color: string}|null>>} board - 棋盘
+ * @param {number} r - 棋子行坐标
+ * @param {number} c - 棋子列坐标
+ * @param {{castlingRights: object, enPassantTarget: object|null}} state - 游戏状态
+ * @returns {Array<{from: {r: number, c: number}, to: {r: number, c: number}, special?: string}>} 合法走法列表
+ */
 export function getLegalMoves(board, r, c, state) {
   const piece = board[r][c];
   if (!piece) return [];
@@ -330,7 +398,14 @@ export function getLegalMoves(board, r, c, state) {
   return legal;
 }
 
-// 判断 color 方是否还有任意合法走法（用于将杀/逼和判定）。
+/**
+ * 判断 color 方是否还有任意合法走法（用于将杀/逼和判定）。
+ * 遍历该方所有棋子，逐个检查是否存在合法走法。
+ * @param {Array<Array<{type: string, color: string}|null>>} board - 棋盘
+ * @param {'white'|'black'} color - 要检查的一方
+ * @param {{castlingRights: object, enPassantTarget: object|null}} state - 游戏状态
+ * @returns {boolean} 是否存在至少一个合法走法
+ */
 export function hasAnyLegalMove(board, color, state) {
   for (let r = 0; r < 8; r++) {
     for (let c = 0; c < 8; c++) {
@@ -343,17 +418,34 @@ export function hasAnyLegalMove(board, color, state) {
   return false;
 }
 
-// 将杀：被将军且无合法走法。
+/**
+ * 判断是否将杀：被将军且无合法走法。
+ * @param {Array<Array<{type: string, color: string}|null>>} board - 棋盘
+ * @param {'white'|'black'} color - 被检查方
+ * @param {{castlingRights: object, enPassantTarget: object|null}} state - 游戏状态
+ * @returns {boolean}
+ */
 export function isCheckmate(board, color, state) {
   return isInCheck(board, color) && !hasAnyLegalMove(board, color, state);
 }
 
-// 逼和：未被将军且无合法走法。
+/**
+ * 判断是否逼和（无子可动）：未被将军且无合法走法。
+ * @param {Array<Array<{type: string, color: string}|null>>} board - 棋盘
+ * @param {'white'|'black'} color - 被检查方
+ * @param {{castlingRights: object, enPassantTarget: object|null}} state - 游戏状态
+ * @returns {boolean}
+ */
 export function isStalemate(board, color, state) {
   return !isInCheck(board, color) && !hasAnyLegalMove(board, color, state);
 }
 
-// 子力不足和棋：仅王；王+单马/单象对王；王+单象对王+单象且象同色格。
+/**
+ * 判断是否子力不足和棋。
+ * 规则：仅剩王；王+单马/单象对王；王+单象对王+单象且两象同色格。
+ * @param {Array<Array<{type: string, color: string}|null>>} board - 棋盘
+ * @returns {boolean} 是否子力不足
+ */
 export function isInsufficientMaterial(board) {
   const white = [];
   const black = [];
@@ -366,19 +458,21 @@ export function isInsufficientMaterial(board) {
     }
   }
 
+  // 过滤出非王棋子
   const nonKing = (arr) => arr.filter((p) => p.type !== 'k');
   const w = nonKing(white);
   const b = nonKing(black);
 
-  // 仅剩王
+  // 仅剩王（双方都只有王）
   if (w.length === 0 && b.length === 0) return true;
 
   // 王 + 单轻子（马/象）对王
   if (w.length === 1 && b.length === 0 && (w[0].type === 'n' || w[0].type === 'b')) return true;
   if (b.length === 1 && w.length === 0 && (b[0].type === 'n' || b[0].type === 'b')) return true;
 
-  // 王 + 单象 对 王 + 单象，且两象位于同色格
+  // 王 + 单象 对 王 + 单象，且两象位于同色格（通过 (r+c)%2 判断格子颜色）
   if (w.length === 1 && b.length === 1 && w[0].type === 'b' && b[0].type === 'b') {
+    // 格子颜色：行+列为偶数为白格，奇数为黑格
     if ((w[0].r + w[0].c) % 2 === (b[0].r + b[0].c) % 2) return true;
   }
 
