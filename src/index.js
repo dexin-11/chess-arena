@@ -1784,10 +1784,10 @@ function buildXiangqiDOM(boardEl) {
   ];
   for (const p of palaces) {
     const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    line.setAttribute('x1', vx(p.c1) - 0.5);
-    line.setAttribute('y1', vy(p.r1) - 0.5);
-    line.setAttribute('x2', vx(p.c2) - 0.5);
-    line.setAttribute('y2', vy(p.r2) - 0.5);
+    line.setAttribute('x1', vx(p.c1));
+    line.setAttribute('y1', vy(p.r1));
+    line.setAttribute('x2', vx(p.c2));
+    line.setAttribute('y2', vy(p.r2));
     svg.appendChild(line);
   }
 
