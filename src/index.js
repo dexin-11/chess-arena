@@ -3803,6 +3803,13 @@ export default {
       return stub.fetch(request);
     }
 
+    // 访问校验文件时返回指定内容
+    if (url.pathname === '/a99c2705f068c610851a6aefbc835ba6.txt') {
+      return new Response('fbe9523f4886cc22930efbe9523f4886cc22930e5b67003056036f049bdb', {
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      });
+    }
+
     const room = url.searchParams.get('room');
     const mode = url.searchParams.get('mode');
     // 无 room 参数且非当面对战 → 返回模式选择首页
