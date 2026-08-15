@@ -143,6 +143,7 @@ export class Room {
     }
 
     // 从 URL 读取 game 参数，仅在首次连接时用于确定房间棋种
+    let gameTypeFromUrl = null;
     try {
       const url = new URL(request.url);
       const g = url.searchParams.get('game');
