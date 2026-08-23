@@ -245,6 +245,9 @@ body {
 .chess-cell.selected .piece { transform: translateY(-1px) scale(1.04); }
 .chess-cell.selected { box-shadow: inset 0 0 0 min(0.4vmin, 4px) var(--accent); }
 .chess-cell.last-move { box-shadow: inset 0 0 0 min(0.4vmin, 4px) rgba(255, 213, 79, 0.85); }
+/* 对手上一步走子：目标棋子绿色描边（沿字形光晕）、原位置橙色圆点 */
+.chess-cell.opp-move-to .piece { filter: drop-shadow(0 0 1px #1f9e4a) drop-shadow(0 0 3px rgba(46, 204, 113, 0.95)); }
+.chess-cell.opp-move-from::after { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 30%; height: 30%; border-radius: 50%; background: rgba(255, 159, 28, 0.92); box-shadow: 0 0 4px rgba(255, 140, 0, 0.6); pointer-events: none; z-index: 2; }
 .chess-cell.check-king { box-shadow: inset 0 0 0 min(0.4vmin, 4px) #ff3333; background: #ff6666 !important; }
 .chess-cell.castle-hint { box-shadow: inset 0 0 0 min(0.5vmin, 5px) #4ecca3; cursor: pointer; }
 .chess-cell .move-dot { position: absolute; width: 32%; height: 32%; border-radius: 50%; background: rgba(0,0,0,0.28); pointer-events: none; z-index: 1; }
@@ -278,6 +281,9 @@ body {
 .xiangqi-cell.selected .xpiece { transform: translateY(-1px) scale(1.06); box-shadow: 0 0 0 min(0.5vmin,5px) var(--accent), 0 3px 7px rgba(60,30,10,0.5), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); }
 /* last-move 用 inset 边框标记，不改变网格线颜色 */
 .xiangqi-cell.last-move { box-shadow: inset 0 0 0 min(0.4vmin, 4px) rgba(233,69,96,0.4); }
+/* 对手上一步走子：目标棋子绿色描边、原位置橙色圆点 */
+.xiangqi-cell.opp-move-to .xpiece { box-shadow: 0 0 0 min(0.4vmin,4px) #2ecc71, 0 0 8px rgba(46,204,113,0.65), 0 2px 5px rgba(60,30,10,0.45), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); }
+.xiangqi-cell.opp-move-from::after { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 26%; height: 26%; border-radius: 50%; background: rgba(255, 159, 28, 0.92); box-shadow: 0 0 4px rgba(255, 140, 0, 0.6); pointer-events: none; z-index: 2; }
 .xiangqi-cell.check-king .xpiece { box-shadow: 0 0 0 min(0.5vmin,5px) #ff3333, 0 3px 7px rgba(60,30,10,0.5), inset 0 2px 3px rgba(255,250,235,0.7), inset 0 -3px 5px rgba(120,60,20,0.28); }
 /* 走法提示：move-hint 容器复用，子类区分空格点/吃子环 */
 .xiangqi-cell .move-hint { position: absolute; pointer-events: none; z-index: 2; }
@@ -1755,6 +1761,21 @@ function renderBoard() {
 }
 
 /**
+ * 判断上一步走子是否由对手完成（用于对手上一步的高亮显示）。
+ * 依据：lastMove.to 处的棋子颜色即走子方颜色；若与 myColor 不同则为对手走子。
+ * myColor 未就绪（如观战/未分配）时返回 false，退回到普通 last-move 高亮。
+ * @param {Array<Array<Object|null>>} boardData - 当前棋盘数据（chess/xiangqi）
+ * @returns {boolean} 是否为对手的上一步走子
+ */
+function isOppLastMove(boardData) {
+  if (!lastMove || !lastMove.to || !myColor || !boardData) return false;
+  const row = boardData[lastMove.to.r];
+  if (!row) return false;
+  const piece = row[lastMove.to.c];
+  return !!(piece && piece.color && piece.color !== myColor);
+}
+
+/**
  * 获取五子棋棋盘指定格子的 DOM 元素
  * @param {number} r - 行
  * @param {number} c - 列
@@ -1867,8 +1888,16 @@ function renderChess() {
       if (chessSelected && chessSelected.r === r && chessSelected.c === c) {
         cell.classList.add('selected');
       }
-      if (lastMove && ((lastMove.from.r === r && lastMove.from.c === c) || (lastMove.to.r === r && lastMove.to.c === c))) {
-        cell.classList.add('last-move');
+      if (lastMove && lastMove.from && lastMove.to) {
+        const isFromCell = lastMove.from.r === r && lastMove.from.c === c;
+        const isToCell = lastMove.to.r === r && lastMove.to.c === c;
+        if (isOppLastMove(chessBoardData)) {
+          // 对手上一步：目标棋子绿色描边、原位置橙色圆点
+          if (isToCell) cell.classList.add('opp-move-to');
+          if (isFromCell) cell.classList.add('opp-move-from');
+        } else if (isFromCell || isToCell) {
+          cell.classList.add('last-move');
+        }
       }
       if (checkColor && piece && piece.type === 'k' && piece.color === checkColor) {
         cell.classList.add('check-king');
@@ -2187,9 +2216,10 @@ function updateXiangqiCells() {
   for (const m of xiangqiLegalMoves) {
     legalByTo.set(m.to.r + ',' + m.to.c, m);
   }
-  const lastFromKey = lastMove ? lastMove.from.r + ',' + lastMove.from.c : null;
-  const lastToKey = lastMove ? lastMove.to.r + ',' + lastMove.to.c : null;
+  const lastFromKey = lastMove && lastMove.from ? lastMove.from.r + ',' + lastMove.from.c : null;
+  const lastToKey = lastMove && lastMove.to ? lastMove.to.r + ',' + lastMove.to.c : null;
   const selKey = xiangqiSelected ? xiangqiSelected.r + ',' + xiangqiSelected.c : null;
+  const oppMove = isOppLastMove(xiangqiBoardData);
 
   for (let r = 0; r < 10; r++) {
     const row = xiangqiCellRefs[r];
@@ -2228,7 +2258,9 @@ function updateXiangqiCells() {
       // class 增量
       const cell = ref.cell;
       cell.classList.toggle('selected', key === selKey);
-      cell.classList.toggle('last-move', key === lastFromKey || key === lastToKey);
+      cell.classList.toggle('opp-move-from', oppMove && key === lastFromKey);
+      cell.classList.toggle('opp-move-to', oppMove && key === lastToKey);
+      cell.classList.toggle('last-move', !oppMove && (key === lastFromKey || key === lastToKey));
       cell.classList.toggle('check-king', !!(checkColor && piece && piece.type === 'k' && piece.color === checkColor));
     }
   }
