@@ -226,6 +226,9 @@ body {
 .cell .stone { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 82%; height: 82%; border-radius: 50%; z-index: 2; }
 .stone.black { background: radial-gradient(circle at 35% 30%, #4a4a4a, #050505 70%); box-shadow: 1px 2px 4px rgba(0,0,0,0.6), inset 0 -2px 4px rgba(0,0,0,0.5); }
 .stone.white { background: radial-gradient(circle at 35% 30%, #ffffff, #b0b0b0 80%); box-shadow: 1px 2px 4px rgba(0,0,0,0.4), inset 0 -2px 4px rgba(0,0,0,0.2); }
+/* 对手上一步刚落的子：绿色描边环（保留棋子立体感） */
+.cell.opp-move-to .stone.black { box-shadow: 0 0 0 min(0.5vmin, 4px) rgba(46, 204, 113, 0.95), 0 0 min(1.2vmin, 9px) rgba(46, 204, 113, 0.55), 1px 2px 4px rgba(0,0,0,0.6), inset 0 -2px 4px rgba(0,0,0,0.5); }
+.cell.opp-move-to .stone.white { box-shadow: 0 0 0 min(0.5vmin, 4px) rgba(46, 204, 113, 0.95), 0 0 min(1.2vmin, 9px) rgba(46, 204, 113, 0.55), 1px 2px 4px rgba(0,0,0,0.4), inset 0 -2px 4px rgba(0,0,0,0.2); }
 
 .cell .preview { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 82%; height: 82%; border-radius: 50%; z-index: 1; opacity: 0.45; pointer-events: none; }
 .preview.black { background: radial-gradient(circle at 35% 30%, #4a4a4a, #050505 70%); }
@@ -1557,7 +1560,7 @@ function applyLocalGomokuMove(r, c) {
   if (gameOver || boardData[r][c]) return;
   const mover = currentTurn;
   boardData[r][c] = mover;
-  lastMove = { row: r, col: c };
+  lastMove = { to: { r, c } };
   if (checkGomokuWin(r, c, mover)) {
     gameOver = true;
     draw = false;
@@ -1764,7 +1767,8 @@ function renderBoard() {
  * 判断上一步走子是否由对手完成（用于对手上一步的高亮显示）。
  * 依据：lastMove.to 处的棋子颜色即走子方颜色；若与 myColor 不同则为对手走子。
  * myColor 未就绪（如观战/未分配）时返回 false，退回到普通 last-move 高亮。
- * @param {Array<Array<Object|null>>} boardData - 当前棋盘数据（chess/xiangqi）
+ * @param {Array<Array<Object|string|null>>} boardData - 当前棋盘数据
+ *   （chess/xiangqi 为 { color, type }，gomoku 为 'black'/'white' 字符串）
  * @returns {boolean} 是否为对手的上一步走子
  */
 function isOppLastMove(boardData) {
@@ -1772,7 +1776,10 @@ function isOppLastMove(boardData) {
   const row = boardData[lastMove.to.r];
   if (!row) return false;
   const piece = row[lastMove.to.c];
-  return !!(piece && piece.color && piece.color !== myColor);
+  if (!piece) return false;
+  // gomoku 的棋子是 'black'/'white' 字符串；chess/xiangqi 是 { color, type }
+  const color = typeof piece === 'string' ? piece : piece.color;
+  return !!color && color !== myColor;
 }
 
 /**
@@ -1806,6 +1813,9 @@ function renderGomoku() {
         if (existing) existing.remove();
         cell.classList.remove('disabled');
       }
+      // 对手上一步刚落的子：绿色描边环高亮
+      const isOppLast = isOppLastMove(boardData) && lastMove && lastMove.to && lastMove.to.r === r && lastMove.to.c === c;
+      cell.classList.toggle('opp-move-to', isOppLast);
     }
   }
 }
@@ -2569,7 +2579,7 @@ function onSimCellClick(r, c) {
   if (boardData[r] && boardData[r][c]) return; // 已有棋子
   boardData[r][c] = simColor;
   simMoves.push({ r, c, color: simColor });
-  lastMove = { from: { r, c }, to: { r, c } };
+  lastMove = { to: { r, c } };
   simColor = simColor === 'black' ? 'white' : 'black';
   renderGomoku();
   updateReviewControls();
@@ -2598,7 +2608,7 @@ function exportReviewHTML() {
     snaps.push({
       gameType: last.gameType,
       board: simBoard,
-      lastMove: simMoves.length > 0 ? { from: { r: simMoves[simMoves.length-1].r, c: simMoves[simMoves.length-1].c }, to: { r: simMoves[simMoves.length-1].r, c: simMoves[simMoves.length-1].c } } : last.lastMove,
+      lastMove: simMoves.length > 0 ? { to: { r: simMoves[simMoves.length-1].r, c: simMoves[simMoves.length-1].c } } : last.lastMove,
       checkColor: null,
       currentTurn: simColor,
     });
@@ -3042,6 +3052,7 @@ function connect() {
           xiangqiLegalMoves = [];
         } else {
           boardData = msg.board;
+          lastMove = msg.lastMove || null;
         }
         currentTurn = msg.currentTurn;
         gameOver = msg.gameOver;

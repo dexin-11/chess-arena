@@ -489,6 +489,8 @@ export class Room {
 
     this.board[row][col] = conn.color;
     const move = { row, col };
+    // 记录五子棋上一步落子（仅有落点，无起止位置），供客户端高亮对手刚落的子
+    this.lastMove = { to: { r: row, c: col } };
 
     if (this.checkWin(row, col, conn.color)) {
       // 五子连珠 → 该玩家获胜
@@ -892,6 +894,8 @@ export class Room {
     } else if (this.gameType === 'xiangqi') {
       payload.lastMove = this.lastMove;
       payload.xiangqiState = this.xiangqiState;
+    } else if (this.gameType === 'gomoku') {
+      payload.lastMove = this.lastMove;
     }
     this.broadcast(payload);
   }
