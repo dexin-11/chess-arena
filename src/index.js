@@ -308,13 +308,13 @@ body {
 .ultimate-cell:nth-child(3n) { border-right: none; }
 .ultimate-cell:nth-child(n+7) { border-bottom: none; }
 .ultimate-board.closed .ultimate-cell { cursor: default; }
-.ultimate-cell .mark { font-size: calc(var(--board-size) * 0.052); font-weight: 700; line-height: 1; pointer-events: none; }
+.ultimate-cell .mark { display: flex; align-items: center; justify-content: center; font-size: calc(var(--board-size) * 0.052); font-weight: 700; line-height: 1; pointer-events: none; }
 .ultimate-cell .mark.black { color: #1a1a1a; }
-.ultimate-cell .mark.white { color: #fff; text-shadow: 0 0 1px #333, 1px 0 0 #333, -1px 0 0 #333, 0 1px 0 #333, 0 -1px 0 #333, 1px 1px 0 #333, -1px -1px 0 #333, 1px -1px 0 #333, -1px 1px 0 #333; }
+.ultimate-cell .mark.white { width: 60%; height: 60%; border: calc(var(--board-size) * 0.007) solid #fff; border-radius: 50%; box-sizing: border-box; box-shadow: 0 0 0 1px rgba(20,15,10,0.55); }
 .ultimate-cell.last-move { background: rgba(78,204,163,0.24); }
 .ultimate-board .board-winner { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: calc(var(--board-size) * 0.11); font-weight: 700; line-height: 1; pointer-events: none; opacity: 0.42; }
 .ultimate-board .board-winner.black { color: #1a1a1a; }
-.ultimate-board .board-winner.white { color: #fff; text-shadow: 0 0 2px #333, 0 0 4px rgba(0,0,0,0.5); }
+.ultimate-board .board-winner.white { inset: 22%; border: calc(var(--board-size) * 0.012) solid #fff; border-radius: 50%; box-sizing: border-box; box-shadow: 0 0 0 1px rgba(20,15,10,0.55); }
 .ultimate-board.draw .board-winner { font-size: calc(var(--board-size) * 0.06); color: #8B7355; }
 /* 兼容旧直接类名（以防其他位置直接用 move-dot/capture-ring） */
 .xiangqi-cell .move-dot { position: absolute; width: 26%; height: 26%; border-radius: 50%; background: rgba(60,30,10,0.3); pointer-events: none; z-index: 2; left: 50%; top: 50%; transform: translate(-50%, -50%); }
@@ -2010,7 +2010,7 @@ function renderUltimate() {
       if (value) {
         const mark = document.createElement('span');
         mark.className = 'mark ' + value;
-        mark.textContent = value === 'black' ? '✕' : '○';
+        mark.textContent = value === 'black' ? '✕' : '';
         cell.appendChild(mark);
       }
       if (lastMove && lastMove.board === b && lastMove.to && lastMove.to.r === r && lastMove.to.c === c) {
@@ -2023,7 +2023,7 @@ function renderUltimate() {
     if (winner) {
       const overlay = document.createElement('div');
       overlay.className = 'board-winner ' + (winner === 'draw' ? 'draw' : winner);
-      overlay.textContent = winner === 'draw' ? '—' : (winner === 'black' ? '✕' : '○');
+      overlay.textContent = winner === 'draw' ? '—' : (winner === 'black' ? '✕' : '');
       small.appendChild(overlay);
     }
     grid.appendChild(small);
@@ -2038,6 +2038,8 @@ function renderUltimate() {
  * @param {number} c - 小棋盘内列
  */
 function onUltimateCellClick(b, r, c) {
+  if (simMode) { onSimUltimateCellClick(b, r, c); return; }
+  if (replaying) return;
   if (gameOver || !myColor || myColor !== currentTurn) return;
   const move = { b: b, r: r, c: c };
   if (localMode) {
@@ -2617,6 +2619,9 @@ function sendXiangqiMove(move) {
  * @returns {string} 中文颜色名称
  */
 function colorLabel(color) {
+  if (gameType === 'ultimate' && (color === 'black' || color === 'white')) {
+    return color === 'black' ? '叉' : '圈';
+  }
   if (color === 'red') return '红棋';
   if (color === 'black') return '黑棋';
   if (color === 'white') return '白棋';
@@ -2843,14 +2848,25 @@ function toggleSimMode() {
  * 进入模拟重下模式：从当前复盘快照开始，本地轮流落子
  */
 function enterSimMode() {
-  if (gameType !== 'gomoku') { setStatus('模拟重下仅支持五子棋'); return; }
+  if (gameType !== 'gomoku' && gameType !== 'ultimate') {
+    setStatus('模拟重下暂支持五子棋和终极井字棋');
+    return;
+  }
   // 从当前复盘快照开始模拟：以快照的 currentTurn 作为下一手颜色
   const snap = moveHistory[replayIndex];
   if (!snap) return;
   simMode = true;
   simMoves = [];
-  // 五子棋 currentTurn 为 black/white；开局快照 currentTurn=black
+  // 五子棋/终极井字棋 currentTurn 均为 black/white
   simColor = snap.currentTurn || 'black';
+  if (gameType === 'ultimate') {
+    // 从快照复制一份可变的模拟局面，避免污染历史快照
+    ultimateBoardData = snap.board ? JSON.parse(JSON.stringify(snap.board)) : Ultimate.initialBoard();
+    ultimateWinners = snap.ultimateWinners ? JSON.parse(JSON.stringify(snap.ultimateWinners)) : Ultimate.initialWinners();
+    ultimateForcedBoard = (snap.ultimateForcedBoard === undefined) ? null : snap.ultimateForcedBoard;
+    lastMove = snap.lastMove ? JSON.parse(JSON.stringify(snap.lastMove)) : null;
+    renderUltimate();
+  }
   document.getElementById('board').classList.add('sim-active');
   updateReviewControls();
   setStatus('模拟重下中：点击棋盘轮流落子，再点「模拟重下」退出');
@@ -2886,6 +2902,36 @@ function onSimCellClick(r, c) {
 }
 
 /**
+ * 复盘模拟重下：终极井字棋落子
+ * @param {number} b - 小棋盘索引
+ * @param {number} r - 小棋盘内行
+ * @param {number} c - 小棋盘内列
+ */
+function onSimUltimateCellClick(b, r, c) {
+  if (!simMode || gameType !== 'ultimate') return;
+  const legalMoves = Ultimate.getLegalMoves(ultimateBoardData, ultimateWinners, ultimateForcedBoard);
+  const matched = legalMoves.find(function(m) { return m.b === b && m.r === r && m.c === c; });
+  if (!matched) return;
+  const result = Ultimate.applyMove(ultimateBoardData, ultimateWinners, matched, simColor);
+  ultimateBoardData = result.board;
+  ultimateWinners = result.winners;
+  ultimateForcedBoard = result.forcedBoard;
+  lastMove = { board: b, to: { r: r, c: c } };
+  simMoves.push({
+    b: b, r: r, c: c, color: simColor,
+    board: result.board, winners: result.winners, forcedBoard: result.forcedBoard,
+  });
+  simColor = Ultimate.opposite(simColor);
+  renderUltimate();
+  updateReviewControls();
+  if (result.bigWinner) {
+    setStatus('模拟重下：' + colorLabel(result.bigWinner) + '胜利');
+  } else if (result.draw) {
+    setStatus('模拟重下：和棋');
+  }
+}
+
+/**
  * 导出复盘为自包含 HTML 文件（含所有快照与导航控件）
  */
 function exportReviewHTML() {
@@ -2903,17 +2949,30 @@ function exportReviewHTML() {
   // 若处于模拟重下模式，附加当前模拟状态作为最后一步
   if (simMode && simMoves.length > 0) {
     const last = snaps[snaps.length - 1];
-    const simBoard = last.board ? JSON.parse(JSON.stringify(last.board)) : null;
-    for (const m of simMoves) {
-      if (simBoard) simBoard[m.r][m.c] = m.color;
+    const lastSim = simMoves[simMoves.length - 1];
+    if (last.gameType === 'ultimate') {
+      snaps.push({
+        gameType: 'ultimate',
+        board: lastSim.board,
+        lastMove: { board: lastSim.b, to: { r: lastSim.r, c: lastSim.c } },
+        checkColor: null,
+        currentTurn: simColor,
+        ultimateWinners: lastSim.winners,
+        forcedBoard: lastSim.forcedBoard,
+      });
+    } else {
+      const simBoard = last.board ? JSON.parse(JSON.stringify(last.board)) : null;
+      for (const m of simMoves) {
+        if (simBoard) simBoard[m.r][m.c] = m.color;
+      }
+      snaps.push({
+        gameType: last.gameType,
+        board: simBoard,
+        lastMove: simMoves.length > 0 ? { to: { r: lastSim.r, c: lastSim.c } } : last.lastMove,
+        checkColor: null,
+        currentTurn: simColor,
+      });
     }
-    snaps.push({
-      gameType: last.gameType,
-      board: simBoard,
-      lastMove: simMoves.length > 0 ? { to: { r: simMoves[simMoves.length-1].r, c: simMoves[simMoves.length-1].c } } : last.lastMove,
-      checkColor: null,
-      currentTurn: simColor,
-    });
   }
   const gameLabel = snaps[0].gameType === 'chess' ? '国际象棋' : (snaps[0].gameType === 'xiangqi' ? '中国象棋' : (snaps[0].gameType === 'ultimate' ? '终极井字棋' : '五子棋'));
   const data = JSON.stringify(snaps);
@@ -3021,25 +3080,78 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
     '.u-cell { display: flex; align-items: center; justify-content: center; border-right: 1px solid rgba(60,30,10,0.28); border-bottom: 1px solid rgba(60,30,10,0.28); font-size: 5vmin; font-weight: 700; }',
     '.u-cell:nth-child(3n) { border-right: none; }',
     '.u-cell:nth-child(n+7) { border-bottom: none; }',
+    '.u-cell .mark { display: flex; align-items: center; justify-content: center; }',
     '.u-cell .mark.black { color: #1a1a1a; }',
-    '.u-cell .mark.white { color: #fff; text-shadow: 0 0 1px #333, 1px 0 0 #333, -1px 0 0 #333, 0 1px 0 #333, 0 -1px 0 #333; }',
+    '.u-cell .mark.white { width: 60%; height: 60%; border: 0.35vmin solid #fff; border-radius: 50%; box-sizing: border-box; box-shadow: 0 0 0 1px rgba(20,15,10,0.55); }',
     '.u-cell.last-move { background: rgba(78,204,163,0.24); }',
     '.u-winner { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11vmin; font-weight: 700; opacity: 0.42; pointer-events: none; }',
     '.u-winner.black { color: #1a1a1a; }',
-    '.u-winner.white { color: #fff; text-shadow: 0 0 2px #333; }'
+    '.u-winner.white { inset: 22%; border: 0.6vmin solid #fff; border-radius: 50%; box-sizing: border-box; box-shadow: 0 0 0 1px rgba(20,15,10,0.55); }'
   ].join(N);
   var js = [
     'var simMode = false;',
     'var simMoves = [];',
     'var simColor = "black";',
+    'var simUlt = null;',
+    'var ULT_LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];',
+    'function ultInitialBoard() { var b = []; for (var i = 0; i < 9; i++) b.push([null,null,null,null,null,null,null,null,null]); return b; }',
+    'function ultInitialWinners() { return [null,null,null,null,null,null,null,null,null]; }',
+    'function ultLineWinner(cells) {',
+    '  for (var i = 0; i < ULT_LINES.length; i++) {',
+    '    var l = ULT_LINES[i];',
+    '    var v = cells[l[0]];',
+    '    if (v && v !== "draw" && v === cells[l[1]] && v === cells[l[2]]) return v;',
+    '  }',
+    '  return null;',
+    '}',
+    'function ultPlayable(board, winners, b) {',
+    '  return !!(board && board[b] && winners && winners[b] === null && board[b].indexOf(null) !== -1);',
+    '}',
+    'function ultLegalMoves(board, winners, forced) {',
+    '  var moves = [];',
+    '  if (!board || !winners) return moves;',
+    '  var restrict = forced !== null && forced !== undefined && ultPlayable(board, winners, forced);',
+    '  for (var b = 0; b < 9; b++) {',
+    '    if (!ultPlayable(board, winners, b)) continue;',
+    '    if (restrict && b !== forced) continue;',
+    '    for (var i = 0; i < 9; i++) if (board[b][i] === null) moves.push({ b: b, r: Math.floor(i / 3), c: i % 3 });',
+    '  }',
+    '  return moves;',
+    '}',
+    'function ultApplyMove(board, winners, move, color) {',
+    '  var newBoard = [], newWinners = winners.slice();',
+    '  for (var i = 0; i < 9; i++) newBoard.push(board[i].slice());',
+    '  newBoard[move.b][move.r * 3 + move.c] = color;',
+    '  if (newWinners[move.b] === null) {',
+    '    var sw = ultLineWinner(newBoard[move.b]);',
+    '    if (sw) newWinners[move.b] = sw;',
+    '    else { var full = true; for (var j = 0; j < 9; j++) if (newBoard[move.b][j] === null) full = false; if (full) newWinners[move.b] = "draw"; }',
+    '  }',
+    '  var big = ultLineWinner(newWinners);',
+    '  var next = move.r * 3 + move.c;',
+    '  var forced = ultPlayable(newBoard, newWinners, next) ? next : null;',
+    '  return { board: newBoard, winners: newWinners, bigWinner: big, forcedBoard: forced };',
+    '}',
     'function curBoard() {',
     '  var s = SNAPS[idx];',
+    '  if (s.gameType === "ultimate") return (simMode && simUlt) ? simUlt.board : s.board;',
     '  if (!simMode || simMoves.length === 0) return s.board;',
     '  var b = JSON.parse(JSON.stringify(s.board));',
     '  for (var i = 0; i < simMoves.length; i++) { var m = simMoves[i]; b[m.r][m.c] = m.color; }',
     '  return b;',
     '}',
+    'function curUltWinners() {',
+    '  var s = SNAPS[idx];',
+    '  if (simMode && simUlt) return simUlt.winners;',
+    '  return s.ultimateWinners || ultInitialWinners();',
+    '}',
+    'function curUltForced() {',
+    '  var s = SNAPS[idx];',
+    '  if (simMode && simUlt) return simUlt.forcedBoard;',
+    '  return s.forcedBoard;',
+    '}',
     'function curLastMove() {',
+    '  if (SNAPS[idx].gameType === "ultimate" && simMode && simUlt) return simUlt.lastMove;',
     '  if (!simMode || simMoves.length === 0) return SNAPS[idx].lastMove;',
     '  var last = simMoves[simMoves.length - 1];',
     '  return { from: { r: last.r, c: last.c }, to: { r: last.r, c: last.c } };',
@@ -3049,16 +3161,26 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
     '}',
     'function enterSim() {',
     '  var s = SNAPS[idx];',
-    '  if (s.gameType !== "gomoku") { alert("模拟重下仅支持五子棋"); return; }',
+    '  if (s.gameType !== "gomoku" && s.gameType !== "ultimate") { alert("模拟重下暂支持五子棋和终极井字棋"); return; }',
     '  simMode = true;',
     '  simMoves = [];',
     '  simColor = s.currentTurn || "black";',
+    '  simUlt = null;',
+    '  if (s.gameType === "ultimate") {',
+    '    simUlt = {',
+    '      board: s.board ? JSON.parse(JSON.stringify(s.board)) : ultInitialBoard(),',
+    '      winners: s.ultimateWinners ? JSON.parse(JSON.stringify(s.ultimateWinners)) : ultInitialWinners(),',
+    '      forcedBoard: (s.forcedBoard === undefined) ? null : s.forcedBoard,',
+    '      lastMove: s.lastMove || null',
+    '    };',
+    '  }',
     '  render();',
     '}',
     'function exitSim() {',
     '  if (!simMode) return;',
     '  simMode = false;',
     '  simMoves = [];',
+    '  simUlt = null;',
     '  render();',
     '}',
     'function onCellClick(r, c) {',
@@ -3072,13 +3194,31 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
     '  simColor = simColor === "black" ? "white" : "black";',
     '  render();',
     '}',
+    'function onUltCellClick(b, r, c) {',
+    '  var s = SNAPS[idx];',
+    '  if (s.gameType !== "ultimate") return;',
+    '  if (!simMode) enterSim();',
+    '  if (!simMode || !simUlt) return;',
+    '  var legal = ultLegalMoves(simUlt.board, simUlt.winners, simUlt.forcedBoard);',
+    '  var ok = false;',
+    '  for (var i = 0; i < legal.length; i++) if (legal[i].b === b && legal[i].r === r && legal[i].c === c) ok = true;',
+    '  if (!ok) return;',
+    '  var res = ultApplyMove(simUlt.board, simUlt.winners, { b: b, r: r, c: c }, simColor);',
+    '  simUlt.board = res.board;',
+    '  simUlt.winners = res.winners;',
+    '  simUlt.forcedBoard = res.forcedBoard;',
+    '  simUlt.lastMove = { board: b, to: { r: r, c: c } };',
+    '  simMoves.push({ b: b, r: r, c: c, color: simColor, board: res.board, winners: res.winners, forcedBoard: res.forcedBoard });',
+    '  simColor = simColor === "black" ? "white" : "black";',
+    '  render();',
+    '}',
     'function renderUltimate(s) {',
     '  var boardData = curBoard();',
     '  var lastMove = curLastMove();',
-    '  var winners = s.ultimateWinners || [];',
-    '  var forced = s.forcedBoard;',
+    '  var winners = curUltWinners();',
+    '  var forced = curUltForced();',
     '  var boardEl = document.getElementById("board");',
-    '  boardEl.className = "board-wrap ultimate";',
+    '  boardEl.className = "board-wrap ultimate" + (simMode ? " sim-active" : "");',
     '  boardEl.innerHTML = "";',
     '  var grid = document.createElement("div");',
     '  grid.className = "u-grid";',
@@ -3097,16 +3237,17 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
     '      if (v) {',
     '        var mk = document.createElement("span");',
     '        mk.className = "mark " + v;',
-    '        mk.textContent = v === "black" ? "✕" : "○";',
+    '        mk.textContent = v === "black" ? "✕" : "";',
     '        cell.appendChild(mk);',
     '      }',
     '      if (lastMove && lastMove.board === b && lastMove.to && lastMove.to.r === r && lastMove.to.c === c) cell.classList.add("last-move");',
+    '      if (simMode && open) cell.addEventListener("click", (function(bb, rr, cc) { return function() { onUltCellClick(bb, rr, cc); }; })(b, r, c));',
     '      sm.appendChild(cell);',
     '    }',
     '    if (w) {',
     '      var ov = document.createElement("div");',
     '      ov.className = "u-winner " + w;',
-    '      ov.textContent = w === "draw" ? "—" : (w === "black" ? "✕" : "○");',
+    '      ov.textContent = w === "draw" ? "—" : (w === "black" ? "✕" : "");',
     '      sm.appendChild(ov);',
     '    }',
     '    grid.appendChild(sm);',
@@ -3235,8 +3376,8 @@ function updateStatus(msg) {
   var secondColor = (gameType === 'xiangqi') ? 'red' : 'white';
   var blackLabelEl = document.getElementById('blackLabel');
   var whiteLabelEl = document.getElementById('whiteLabel');
-  if (blackLabelEl) blackLabelEl.textContent = '黑棋';
-  if (whiteLabelEl) whiteLabelEl.textContent = (gameType === 'xiangqi') ? '红棋' : '白棋';
+  if (blackLabelEl) blackLabelEl.textContent = (gameType === 'ultimate') ? '叉' : '黑棋';
+  if (whiteLabelEl) whiteLabelEl.textContent = (gameType === 'xiangqi') ? '红棋' : (gameType === 'ultimate' ? '圈' : '白棋');
   // black 总是映射到 blackDot/blackLatency；第二色映射到 whiteDot/whiteLatency
   var pairs = [['black', 'black'], [secondColor, 'white']];
   pairs.forEach(function(pair) {

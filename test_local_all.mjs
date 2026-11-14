@@ -144,6 +144,10 @@ const BOOTSTRAP = `
   get moveHistory(){return moveHistory},
   get lastMove(){return lastMove},
   get checkColor(){return checkColor},
+  get simMode(){return simMode},
+  get simMoves(){return simMoves},
+  get replaying(){return replaying},
+  get replayIndex(){return replayIndex},
 };
 ;globalThis.__setBoard = function(name, board) {
   if (name === 'xiangqiBoardData') xiangqiBoardData = board;
@@ -380,7 +384,28 @@ function testUltimate() {
   assert(!S.draw, '不应误判和棋');
   assert(S.ultimateWinners[2] === 'black', '2 号小棋盘应被黑方占领');
   const txt = S.document.getElementById('resultText').textContent;
-  assert(txt.includes('黑棋') && txt.includes('胜利'), '结果文案应含黑棋胜利: ' + txt);
+  assert(txt.includes('叉') && txt.includes('胜利'), '结果文案应含叉胜利: ' + txt);
+  assert(sb.colorLabel('white') === '圈' && sb.colorLabel('black') === '叉', '终极井字棋颜色文案应为叉/圈');
+
+  // 复盘模拟重下：应能进入、落子、退出并恢复快照
+  const sb2 = runClient('?game=ultimate&mode=local');
+  const S2 = sb2.__SB;
+  S2.applyLocalUltimateMove({ b: 0, r: 0, c: 0 });
+  S2.applyLocalUltimateMove({ b: 0, r: 1, c: 1 });
+  const beforeReview = JSON.stringify(S2.ultimateBoardData);
+  sb2.enterReview();
+  assert(S2.replaying, '应进入复盘');
+  sb2.enterSimMode();
+  assert(S2.simMode, '终极井字棋复盘应能进入模拟重下');
+  const reviewSnap = S2.moveHistory[S2.replayIndex];
+  const reviewLegal = Ultimate.getLegalMoves(reviewSnap.board, reviewSnap.ultimateWinners, reviewSnap.ultimateForcedBoard);
+  const rm = reviewLegal[0];
+  sb2.onSimUltimateCellClick(rm.b, rm.r, rm.c);
+  assert(S2.simMoves.length === 1, '模拟重下落子未记录');
+  assert(S2.ultimateBoardData[rm.b][rm.r * 3 + rm.c] === reviewSnap.currentTurn, '模拟重下落子位置错误');
+  sb2.exitSimMode();
+  assert(!S2.simMode, '应能退出模拟重下');
+  assert(JSON.stringify(S2.ultimateBoardData) === beforeReview, '退出模拟重下后应恢复复盘快照');
 
   // 复盘导出：终极井字棋快照应生成嵌套棋盘渲染脚本，且脚本语法合法
   const exportSnaps = S.moveHistory.map((x) => ({
@@ -396,7 +421,32 @@ function testUltimate() {
   assert(html.includes('u-grid') && html.includes('renderUltimate'), '导出 HTML 应包含终极井字棋渲染');
   const scriptStart = html.indexOf('<script>') + '<script>'.length;
   const scriptEnd = html.lastIndexOf('</script>');
-  new vm.Script(html.slice(scriptStart, scriptEnd), { filename: 'export-script.js' });
+  const exportScript = html.slice(scriptStart, scriptEnd);
+  new vm.Script(exportScript, { filename: 'export-script.js' });
+
+  // 导出复盘的模拟重下：终极井字棋应能正常落子并退出恢复
+  const exportSandbox = {
+    document: makeMockDocument(),
+    console,
+    alert: (m) => { throw new Error('导出复盘不应弹出 alert: ' + m); },
+  };
+  exportSandbox.window = exportSandbox;
+  exportSandbox.globalThis = exportSandbox;
+  exportSandbox.setTimeout = () => 0;
+  vm.createContext(exportSandbox);
+  vm.runInContext(exportScript, exportSandbox, { filename: 'export-script.js' });
+  exportSandbox.idx = 0;
+  exportSandbox.enterSim();
+  assert(exportSandbox.simMode, '导出复盘应进入模拟重下');
+  const exportFirst = exportSnaps[0];
+  const exportLegal = Ultimate.getLegalMoves(exportFirst.board, exportFirst.ultimateWinners, exportFirst.forcedBoard);
+  const m0 = exportLegal[0];
+  exportSandbox.onUltCellClick(m0.b, m0.r, m0.c);
+  assert(exportSandbox.simMoves.length === 1, '导出复盘模拟落子未记录');
+  assert(exportSandbox.simUlt.board[m0.b][m0.r * 3 + m0.c] === exportFirst.currentTurn, '导出复盘模拟落子位置错误');
+  assert(exportSandbox.simUlt.forcedBoard === m0.r * 3 + m0.c, '导出复盘模拟 forcedBoard 错误');
+  exportSandbox.exitSim();
+  assert(!exportSandbox.simMode, '导出复盘应能退出模拟重下');
 }
 
 // ─── 主流程 ───
