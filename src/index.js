@@ -302,6 +302,7 @@ body {
 .btn:active { transform: scale(0.96); }
 .btn-secondary { background: #2a3458; }
 .btn-secondary:hover { background: #3a4578; }
+#undoBtn:disabled { opacity: 0.35; cursor: not-allowed; }
 .button-row { display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap; justify-content: center; }
 
 /* 等待对手加入遮罩 */
@@ -427,6 +428,8 @@ body {
       <button class="btn" id="copyBtn" onclick="copyLink()">复制链接邀请好友</button>
       <button class="btn btn-secondary" id="waitBtn" onclick="sendWaitNotice()">等一会</button>
       <button class="btn btn-secondary" id="drawBtn" onclick="sendDrawOffer()">求和</button>
+      <!-- 当面对战专用：撤回上一步（在线模式默认隐藏） -->
+      <button class="btn btn-secondary" id="undoBtn" onclick="undoLocalMove()" style="display:none">撤回</button>
     </div>
   </div>
   <!-- 聊天面板：消息列表 + 输入框，支持折叠/展开 -->
@@ -1483,6 +1486,9 @@ function initLocalGame() {
     var el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
+  // 显示当面对战专用的撤回按钮
+  var undoEl = document.getElementById('undoBtn');
+  if (undoEl) undoEl.style.display = '';
   // 初始化棋盘状态（镜像服务端逻辑）
   if (gameType === 'chess') {
     chessBoardData = Chess.initialBoard();
@@ -1523,6 +1529,7 @@ function initLocalGame() {
   moveHistory.push(snapshotState());
   updateHeader();
   setStatus('轮到 ' + colorLabel(currentTurn));
+  updateUndoButton();
 }
 
 /**
@@ -1575,6 +1582,7 @@ function applyLocalGomokuMove(r, c) {
     updateHeader();
     setStatus('轮到 ' + colorLabel(currentTurn));
   }
+  updateUndoButton();
 }
 
 /**
@@ -1626,6 +1634,7 @@ function applyLocalChessMove(move, promotionPiece) {
     if (checkColor) setStatus('将军！轮到 ' + colorLabel(currentTurn), true);
     else setStatus('轮到 ' + colorLabel(currentTurn));
   }
+  updateUndoButton();
 }
 
 /**
@@ -1670,6 +1679,7 @@ function applyLocalXiangqiMove(move) {
     if (checkColor) setStatus('将军！轮到 ' + colorLabel(currentTurn), true);
     else setStatus('轮到 ' + colorLabel(currentTurn));
   }
+  updateUndoButton();
 }
 
 /**
@@ -1711,6 +1721,44 @@ function localRematch() {
   document.getElementById('resultOverlay').classList.add('hidden');
   exitReviewUI();
   initLocalGame();
+}
+
+/**
+ * 当面对战撤回：回退上一步走法（可连续点击，回退到开局为止）
+ */
+function undoLocalMove() {
+  if (!localMode) return;
+  if (replaying || simMode) { setStatus('请先退出复盘再撤回'); return; }
+  if (moveHistory.length <= 1) { setStatus('没有可撤回的走法'); return; }
+  // 丢弃最后一步快照，恢复到上一步状态
+  moveHistory.pop();
+  restoreFromSnapshot(moveHistory[moveHistory.length - 1]);
+  gameOver = false;
+  draw = false;
+  pendingPromotionMove = null;
+  chessSelected = null;
+  chessLegalMoves = [];
+  xiangqiSelected = null;
+  xiangqiLegalMoves = [];
+  myColor = currentTurn;
+  hideAllModals();
+  clearCaptureNotice();
+  renderBoard();
+  updateHeader();
+  if (checkColor) setStatus('将军！轮到 ' + colorLabel(currentTurn), true);
+  else setStatus('轮到 ' + colorLabel(currentTurn));
+  updateUndoButton();
+}
+
+/**
+ * 更新撤回按钮的可见性与可用状态（仅在当面对战且非复盘时可用）
+ */
+function updateUndoButton() {
+  var btn = document.getElementById('undoBtn');
+  if (!btn) return;
+  if (!localMode) { btn.style.display = 'none'; return; }
+  btn.style.display = '';
+  btn.disabled = replaying || simMode || moveHistory.length <= 1;
 }
 
 /**
@@ -2413,6 +2461,7 @@ function enterReview() {
   document.getElementById('resultOverlay').classList.add('hidden');
   document.getElementById('reviewBar').classList.remove('hidden');
   applyReviewSnapshot();
+  updateUndoButton();
 }
 
 /**
@@ -2428,6 +2477,7 @@ function exitReview() {
     renderBoard();
   }
   document.getElementById('resultOverlay').classList.remove('hidden');
+  updateUndoButton();
 }
 
 /**
