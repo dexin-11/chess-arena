@@ -1,10 +1,11 @@
 import * as Chess from './chess.js';
 import * as Xiangqi from './xiangqi.js';
+import * as Ultimate from './ultimate.js';
 
 /**
  * 游戏房间类 —— 基于 Cloudflare Durable Object 实现。
  * 管理两名玩家的 WebSocket 连接、游戏状态同步、走法验证、重连恢复、求和与复盘等功能。
- * 支持三种棋类：五子棋（gomoku）、国际象棋（chess）、中国象棋（xiangqi）。
+ * 支持四种棋类：五子棋（gomoku）、国际象棋（chess）、中国象棋（xiangqi）、终极井字棋（ultimate）。
  */
 export class Room {
   /**
@@ -21,6 +22,7 @@ export class Room {
      * - 'gomoku' — 五子棋（15×15 棋盘，黑先）
      * - 'chess'  — 国际象棋（8×8 棋盘，白先）
      * - 'xiangqi' — 中国象棋（9×10 棋盘，红先）
+     * - 'ultimate' — 终极井字棋（9 个嵌套小棋盘，黑先）
      * 首次玩家连接时从 URL 参数确定，后续连接沿用。
      * @type {string|null}
      */
@@ -53,8 +55,24 @@ export class Room {
      */
     this.xiangqiState = null;
     /**
+     * 终极井字棋棋盘状态（9 个小棋盘，每个 3×3）。
+     * @type {Array<Array<string|null>>|null}
+     */
+    this.ultimateBoard = null;
+    /**
+     * 终极井字棋小棋盘结果：null / 'black' / 'white' / 'draw'。
+     * @type {Array<string|null>|null}
+     */
+    this.ultimateWinners = null;
+    /**
+     * 终极井字棋下一手必须落子的小棋盘索引；null 表示可自由选择。
+     * @type {number|null}
+     */
+    this.ultimateForcedBoard = null;
+    /**
      * 上一步走子记录，用于客户端高亮上一步落子位置。
-     * 五子棋格式：{ row, col }；象棋格式：{ from: {r,c}, to: {r,c} }。
+     * 五子棋格式：{ row, col }；象棋格式：{ from: {r,c}, to: {r,c} }；
+     * 终极井字棋格式：{ board, to: {r,c} }。
      * @type {Object|null}
      */
     this.lastMove = null;
@@ -149,6 +167,7 @@ export class Room {
       const g = url.searchParams.get('game');
       if (g === 'chess') gameTypeFromUrl = 'chess';
       else if (g === 'xiangqi') gameTypeFromUrl = 'xiangqi';
+      else if (g === 'ultimate') gameTypeFromUrl = 'ultimate';
     } catch {
       // 忽略 URL 解析错误，使用默认值
     }
@@ -183,6 +202,9 @@ export class Room {
       } else if (this.gameType === 'xiangqi') {
         this.initXiangqiState();
         this.currentTurn = 'red'; // 中国象棋红方先行
+      } else if (this.gameType === 'ultimate') {
+        this.initUltimateState();
+        this.currentTurn = 'black'; // 终极井字棋黑方先行
       }
     }
 
@@ -253,12 +275,13 @@ export class Room {
    * - 五子棋：['black', 'white']（黑先）
    * - 国际象棋：['white', 'black']（白先）
    * - 中国象棋：['red', 'black']（红先）
+   * - 终极井字棋：['black', 'white']（黑先）
    * @returns {string[]} 包含两个颜色字符串的数组，索引 0 为先手方
    */
   playerColors() {
     if (this.gameType === 'chess') return ['white', 'black'];
     if (this.gameType === 'xiangqi') return ['red', 'black'];
-    return ['black', 'white']; // 五子棋黑方先行
+    return ['black', 'white']; // 五子棋/终极井字棋黑方先行
   }
 
   /**
@@ -350,6 +373,7 @@ export class Room {
         if (!conn.color) return;
         if (this.gameType === 'chess') this.handleChessMove(wsId, msg);
         else if (this.gameType === 'xiangqi') this.handleXiangqiMove(wsId, msg);
+        else if (this.gameType === 'ultimate') this.handleUltimateMove(wsId, msg);
         else this.handleMove(wsId, msg);
         break;
 
@@ -596,6 +620,16 @@ export class Room {
   }
 
   /**
+   * 初始化终极井字棋棋盘与规则状态。
+   * 9 个小棋盘、小棋盘结果为空、首手可自由选择（forcedBoard = null）。
+   */
+  initUltimateState() {
+    this.ultimateBoard = Ultimate.initialBoard();
+    this.ultimateWinners = Ultimate.initialWinners();
+    this.ultimateForcedBoard = null;
+  }
+
+  /**
    * 处理中国象棋走子。
    * 验证流程：游戏未结束 → 轮到该玩家 → 棋盘状态有效 → 坐标在 9×10 范围内 →
    * 源格有棋子且属于该玩家 → 走法在合法走子列表中 → 应用走子并判断终局（将杀/困毙）。
@@ -652,6 +686,57 @@ export class Room {
     } else {
       const checkColor = Xiangqi.isInCheck(this.xiangqiBoard, opponentColor) ? opponentColor : null;
       this.broadcastMoveUpdate(matched, conn.color, null, checkColor);
+    }
+  }
+
+  /**
+   * 处理终极井字棋走子。
+   * 验证：游戏未结束 → 轮到该玩家 → 棋盘有效 → 坐标合法 →
+   * 落子在服务端生成的合法走法列表中（含强制小棋盘约束）。
+   * 落子后结算小棋盘占领/大棋盘胜负；若对手被送入已结束的小棋盘，下一手可自由落子。
+   * @param {number} wsId - 走子玩家的 wsId
+   * @param {Object} msg - 消息对象，包含 { b, r, c }（b=小棋盘索引，r/c=小棋盘内坐标）
+   */
+  handleUltimateMove(wsId, msg) {
+    if (this.gameOver) return;
+
+    const conn = this.connections.get(wsId);
+    if (!conn || conn.color !== this.currentTurn) return;
+    if (!this.ultimateBoard || !this.ultimateWinners) return;
+
+    const b = msg.b, r = msg.r, c = msg.c;
+    if (!Number.isInteger(b) || !Number.isInteger(r) || !Number.isInteger(c)) return;
+    if (b < 0 || b > 8 || r < 0 || r > 2 || c < 0 || c > 2) return;
+
+    const legalMoves = Ultimate.getLegalMoves(this.ultimateBoard, this.ultimateWinners, this.ultimateForcedBoard);
+    const matched = legalMoves.find((m) => m.b === b && m.r === r && m.c === c);
+    if (!matched) return;
+
+    const result = Ultimate.applyMove(this.ultimateBoard, this.ultimateWinners, matched, conn.color);
+    this.ultimateBoard = result.board;
+    this.ultimateWinners = result.winners;
+    this.ultimateForcedBoard = result.forcedBoard;
+    this.lastMove = { board: b, to: { r, c } };
+
+    const opponentColor = Ultimate.opposite(conn.color);
+    this.currentTurn = opponentColor;
+
+    if (result.bigWinner) {
+      // 大棋盘三连 → 走子方获胜
+      this.gameOver = true;
+      this.winner = conn.color;
+      this.draw = false;
+      this.broadcast({ type: 'gameOver', winner: conn.color, draw: false });
+      this.broadcastSync();
+    } else if (result.draw) {
+      // 已无任何合法落子 → 和棋
+      this.gameOver = true;
+      this.winner = null;
+      this.draw = true;
+      this.broadcast({ type: 'gameOver', winner: null, draw: true });
+      this.broadcastSync();
+    } else {
+      this.broadcastMoveUpdate(matched, conn.color, null, null);
     }
   }
 
@@ -827,20 +912,21 @@ export class Room {
   }
 
   /**
-   * 规范化棋种字符串，确保返回值为三种合法棋种之一。
+   * 规范化棋种字符串，确保返回值为四种合法棋种之一。
    * @param {string} gt - 原始棋种字符串
-   * @returns {string} 规范化后的棋种：'gomoku' | 'chess' | 'xiangqi'
+   * @returns {string} 规范化后的棋种：'gomoku' | 'chess' | 'xiangqi' | 'ultimate'
    */
   normalizeGameType(gt) {
     if (gt === 'chess') return 'chess';
     if (gt === 'xiangqi') return 'xiangqi';
+    if (gt === 'ultimate') return 'ultimate';
     return 'gomoku';
   }
 
   /**
    * 重新开始新对局（复盘/换棋种再战）。
    * 恢复所有游戏状态至初始值，根据棋种初始化对应棋盘，然后重新分配颜色。
-   * @param {string} newGameType - 新对局的棋种：'gomoku' | 'chess' | 'xiangqi'
+   * @param {string} newGameType - 新对局的棋种：'gomoku' | 'chess' | 'xiangqi' | 'ultimate'
    */
   restartGame(newGameType) {
     this.gameType = this.normalizeGameType(newGameType);
@@ -851,6 +937,9 @@ export class Room {
     } else if (this.gameType === 'xiangqi') {
       this.initXiangqiState();
       this.currentTurn = 'red';
+    } else if (this.gameType === 'ultimate') {
+      this.initUltimateState();
+      this.currentTurn = 'black';
     } else {
       this.board = Array.from({ length: 15 }, () => Array(15).fill(null));
       this.currentTurn = 'black';
@@ -877,6 +966,7 @@ export class Room {
     let board;
     if (this.gameType === 'chess') board = this.chessBoard;
     else if (this.gameType === 'xiangqi') board = this.xiangqiBoard;
+    else if (this.gameType === 'ultimate') board = this.ultimateBoard;
     else board = this.board;
     const payload = {
       type: 'sync',
@@ -894,6 +984,10 @@ export class Room {
     } else if (this.gameType === 'xiangqi') {
       payload.lastMove = this.lastMove;
       payload.xiangqiState = this.xiangqiState;
+    } else if (this.gameType === 'ultimate') {
+      payload.lastMove = this.lastMove;
+      payload.winners = this.ultimateWinners;
+      payload.forcedBoard = this.ultimateForcedBoard;
     } else if (this.gameType === 'gomoku') {
       payload.lastMove = this.lastMove;
     }
@@ -921,7 +1015,11 @@ export class Room {
       lastMove: this.lastMove,
       checkColor: checkColor || null,
     };
-    if (this.gameType === 'gomoku') {
+    if (this.gameType === 'ultimate') {
+      payload.move = { b: move.b, r: move.r, c: move.c };
+      payload.winners = this.ultimateWinners;
+      payload.forcedBoard = this.ultimateForcedBoard;
+    } else if (this.gameType === 'gomoku') {
       payload.move = { row: move.row, col: move.col };
     } else {
       payload.move = { from: move.from, to: move.to };

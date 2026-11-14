@@ -1,11 +1,12 @@
-// 当面对战逻辑综合测试 —— 覆盖全部三种棋种
+// 当面对战逻辑综合测试 —— 覆盖全部四种棋种
 // 做法：从 src/index.js 提取真实客户端脚本，在 vm 沙箱中运行（mock DOM），
-// 分别验证五子棋连五、国际象棋 Fool's Mate 将杀、中国象棋闷宫炮将杀。
+// 分别验证五子棋连五、国际象棋 Fool's Mate 将杀、中国象棋闷宫炮将杀、终极井字棋规则。
 // 运行：node test_local_all.mjs
 
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { URLSearchParams } from 'node:url';
+import * as Ultimate from './src/ultimate.js';
 
 const SRC_PATH = new URL('./src/index.js', import.meta.url).pathname;
 
@@ -123,7 +124,8 @@ function buildSandbox(search) {
 // 追加 bootstrap：将 let/const 词法作用域内的状态通过 getter 暴露到 globalThis
 const BOOTSTRAP = `
 ;globalThis.__SB = {
-  applyLocalGomokuMove, applyLocalChessMove, applyLocalXiangqiMove,
+  applyLocalGomokuMove, applyLocalChessMove, applyLocalXiangqiMove, applyLocalUltimateMove,
+  Ultimate,
   document,
   get localMode(){return localMode},
   get gameType(){return gameType},
@@ -136,6 +138,9 @@ const BOOTSTRAP = `
   get chessState(){return chessState},
   get xiangqiBoardData(){return xiangqiBoardData},
   get xiangqiState(){return xiangqiState},
+  get ultimateBoardData(){return ultimateBoardData},
+  get ultimateWinners(){return ultimateWinners},
+  get ultimateForcedBoard(){return ultimateForcedBoard},
   get moveHistory(){return moveHistory},
   get lastMove(){return lastMove},
   get checkColor(){return checkColor},
@@ -143,6 +148,7 @@ const BOOTSTRAP = `
 ;globalThis.__setBoard = function(name, board) {
   if (name === 'xiangqiBoardData') xiangqiBoardData = board;
   else if (name === 'chessBoardData') chessBoardData = board;
+  else if (name === 'ultimateBoardData') ultimateBoardData = board;
 };
 ;globalThis.__setState = function(o) {
   if ('xiangqiState' in o) xiangqiState = o.xiangqiState;
@@ -153,6 +159,9 @@ const BOOTSTRAP = `
   if ('checkColor' in o) checkColor = o.checkColor;
   if ('xiangqiSelected' in o) xiangqiSelected = o.xiangqiSelected;
   if ('xiangqiLegalMoves' in o) xiangqiLegalMoves = o.xiangqiLegalMoves;
+  if ('ultimateBoardData' in o) ultimateBoardData = o.ultimateBoardData;
+  if ('ultimateWinners' in o) ultimateWinners = o.ultimateWinners;
+  if ('ultimateForcedBoard' in o) ultimateForcedBoard = o.ultimateForcedBoard;
 };
 `;
 
@@ -300,11 +309,102 @@ function testXiangqi() {
   assert(txt.includes('红') && txt.includes('胜利'), '结果文案应含红方胜利: ' + txt);
 }
 
+// ─── 测试 4：终极井字棋 ───
+// 验证：首手自由、强制小棋盘、送入已结束小棋盘后自由落子、小棋盘占领、大棋盘三连获胜。
+function testUltimate() {
+  // 纯规则引擎：初始 81 个合法点
+  const empty = Ultimate.initialBoard();
+  const emptyWinners = Ultimate.initialWinners();
+  assert(Ultimate.getLegalMoves(empty, emptyWinners, null).length === 81, '初始应有 81 个合法落子');
+
+  // 纯规则引擎：送入已结束小棋盘 → 可在任意未结束小棋盘自由落子
+  const w2 = Ultimate.initialWinners();
+  w2[0] = 'black';
+  const freeMoves = Ultimate.getLegalMoves(empty, w2, 0);
+  assert(freeMoves.length === 72, '小棋盘 0 已结束时应可自由落子（72 个）: ' + freeMoves.length);
+  assert(!freeMoves.some((m) => m.b === 0), '已结束的小棋盘不应再落子');
+
+  // 纯规则引擎：小棋盘三连占领
+  const b3 = Ultimate.initialBoard();
+  const w3 = Ultimate.initialWinners();
+  b3[0][0] = 'black';
+  b3[0][1] = 'black';
+  const r3 = Ultimate.applyMove(b3, w3, { b: 0, r: 0, c: 2 }, 'black');
+  assert(r3.winners[0] === 'black', '小棋盘三连后应被黑方占领');
+  assert(r3.forcedBoard === 2, '落子格 (0,2) 应把对手送入小棋盘 2: ' + r3.forcedBoard);
+
+  // 客户端集成：首手自由，落子后强制下一手所在小棋盘
+  const sb = runClient('?game=ultimate&mode=local');
+  const S = sb.__SB;
+  assert(S.localMode, 'localMode 应为 true');
+  assert(S.gameType === 'ultimate', '棋种应为 ultimate');
+  assert(S.currentTurn === 'black', '黑棋应先行');
+  assert(S.myColor === S.currentTurn, 'myColor 应跟随 currentTurn');
+  assert(S.ultimateForcedBoard === null, '首手应可自由落子');
+  assert(!S.gameOver, '初始不应 gameOver');
+
+  // 黑棋在 0 号小棋盘 (0,0) 落子 → 白棋必须去 0 号小棋盘
+  S.applyLocalUltimateMove({ b: 0, r: 0, c: 0 });
+  assert(S.ultimateBoardData[0][0] === 'black', '黑棋落子未记录');
+  assert(S.currentTurn === 'white', '应轮到白棋');
+  assert(S.ultimateForcedBoard === 0, '白棋应被送入 0 号小棋盘: ' + S.ultimateForcedBoard);
+  const forcedMoves = S.Ultimate.getLegalMoves(S.ultimateBoardData, S.ultimateWinners, S.ultimateForcedBoard);
+  assert(forcedMoves.every((m) => m.b === 0), '强制回合只能在小棋盘 0 落子');
+  assert(forcedMoves.length === 8, '小棋盘 0 应剩 8 个空位: ' + forcedMoves.length);
+
+  // 白棋在 0 号小棋盘 (1,1) 落子 → 黑棋必须去 4 号小棋盘
+  S.applyLocalUltimateMove({ b: 0, r: 1, c: 1 });
+  assert(S.currentTurn === 'black', '应轮到黑棋');
+  assert(S.ultimateForcedBoard === 4, '黑棋应被送入 4 号小棋盘: ' + S.ultimateForcedBoard);
+
+  // 构造接近终局的局面：黑方已占领 0、1 号小棋盘，2 号小棋盘已有两子
+  const board = Ultimate.initialBoard();
+  board[2][0] = 'black';
+  board[2][1] = 'black';
+  const winners = Ultimate.initialWinners();
+  winners[0] = 'black';
+  winners[1] = 'black';
+  sb.__setBoard('ultimateBoardData', board);
+  sb.__setState({
+    ultimateWinners: winners,
+    ultimateForcedBoard: 2,
+    currentTurn: 'black',
+    myColor: 'black',
+    gameOver: false,
+    draw: false,
+  });
+
+  // 黑棋在 2 号小棋盘 (0,2) 落子：小棋盘三连 + 大棋盘 0/1/2 三连
+  S.applyLocalUltimateMove({ b: 2, r: 0, c: 2 });
+  assert(S.gameOver, '大棋盘三连后应 gameOver');
+  assert(!S.draw, '不应误判和棋');
+  assert(S.ultimateWinners[2] === 'black', '2 号小棋盘应被黑方占领');
+  const txt = S.document.getElementById('resultText').textContent;
+  assert(txt.includes('黑棋') && txt.includes('胜利'), '结果文案应含黑棋胜利: ' + txt);
+
+  // 复盘导出：终极井字棋快照应生成嵌套棋盘渲染脚本，且脚本语法合法
+  const exportSnaps = S.moveHistory.map((x) => ({
+    gameType: x.gameType,
+    board: x.board,
+    lastMove: x.lastMove,
+    checkColor: x.checkColor || null,
+    currentTurn: x.currentTurn,
+    ultimateWinners: x.ultimateWinners || null,
+    forcedBoard: x.ultimateForcedBoard === undefined ? null : x.ultimateForcedBoard,
+  }));
+  const html = sb.buildExportHTML(exportSnaps, '终极井字棋', JSON.stringify(exportSnaps));
+  assert(html.includes('u-grid') && html.includes('renderUltimate'), '导出 HTML 应包含终极井字棋渲染');
+  const scriptStart = html.indexOf('<script>') + '<script>'.length;
+  const scriptEnd = html.lastIndexOf('</script>');
+  new vm.Script(html.slice(scriptStart, scriptEnd), { filename: 'export-script.js' });
+}
+
 // ─── 主流程 ───
 const tests = [
   ['五子棋·连五', testGomoku],
   ['国际象棋·Fool\'s Mate 将杀', testChess],
   ['中国象棋·闷宫炮将杀', testXiangqi],
+  ['终极井字棋·规则与胜负', testUltimate],
 ];
 
 let passed = 0;

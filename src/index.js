@@ -1,6 +1,6 @@
 /**
  * 棋类对战应用 - 前端入口文件
- * 包含：首页模板、游戏页面模板、前端规则引擎（国际象棋/中国象棋）、
+ * 包含：首页模板、游戏页面模板、前端规则引擎（国际象棋/中国象棋/终极井字棋）、
  * WebSocket 通信、端到端加密聊天、复盘/模拟重下等功能。
  */
 
@@ -11,7 +11,7 @@ import { Room } from './room.js';
 export { Room };
 
 // === 首页模板（HOMEPAGE_HTML）===
-// 游戏选择首页：展示三种棋类（五子棋、国际象棋、中国象棋）入口，
+// 游戏选择首页：展示四种棋类（五子棋、国际象棋、中国象棋、终极井字棋）入口，
 // 支持当面对战和复制链接邀请好友两种模式。内联 CSS 与 JS 实现自包含页面。
 const HOMEPAGE_HTML = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -43,6 +43,8 @@ body { font-family: 'Sora', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-
 .home-btn.chess-btn:hover { background: #1a4a8a; }
 .home-btn.xiangqi-btn { background: #8B4513; }
 .home-btn.xiangqi-btn:hover { background: #A0522D; }
+.home-btn.ultimate-btn { background: #6a4c93; }
+.home-btn.ultimate-btn:hover { background: #8159b5; }
 .mode-overlay { position: fixed; inset: 0; background: rgba(5,8,18,0.7); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); display: none; align-items: center; justify-content: center; z-index: 100; }
 .mode-overlay.show { display: flex; }
 .mode-card { background: linear-gradient(180deg, rgba(28,34,56,0.97), rgba(19,24,41,0.9)); border: 1px solid #2a3458; border-radius: 16px; padding: 36px 32px; display: flex; flex-direction: column; align-items: center; gap: 20px; box-shadow: 0 12px 40px rgba(0,0,0,0.7); min-width: 280px; }
@@ -65,6 +67,7 @@ body { font-family: 'Sora', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-
     <button class="home-btn" onclick="showModeSelect('gomoku')">五子棋</button>
     <button class="home-btn chess-btn" onclick="showModeSelect('chess')">国际象棋</button>
     <button class="home-btn xiangqi-btn" onclick="showModeSelect('xiangqi')">中国象棋</button>
+    <button class="home-btn ultimate-btn" onclick="showModeSelect('ultimate')">终极井字棋</button>
   </div>
 </div>
 <div class="mode-overlay" id="modeOverlay">
@@ -292,6 +295,27 @@ body {
 .xiangqi-cell .move-hint { position: absolute; pointer-events: none; z-index: 2; }
 .xiangqi-cell .move-hint.move-dot { width: 26%; height: 26%; border-radius: 50%; background: rgba(60,30,10,0.3); left: 50%; top: 50%; transform: translate(-50%, -50%); }
 .xiangqi-cell .move-hint.capture-ring { inset: 7%; border: min(0.5vmin,5px) solid rgba(233,69,96,0.6); border-radius: 50%; box-sizing: border-box; }
+
+/* 终极井字棋：3×3 大棋盘，每格嵌套一个 3×3 小棋盘 */
+.board.ultimate { background: transparent; padding: 0; }
+.ultimate-grid { width: 100%; height: 100%; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: clamp(4px, 1vmin, 10px); }
+.ultimate-board { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); background: #f0d9b5; border-radius: 6px; overflow: hidden; box-shadow: 0 0 0 1px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.25); transition: box-shadow 0.15s ease, opacity 0.15s ease, background 0.15s ease; }
+.ultimate-board.active { box-shadow: 0 0 0 2px var(--good), 0 0 12px rgba(78,204,163,0.4); }
+.ultimate-board.closed { opacity: 0.6; }
+.ultimate-board.won-black { background: #cdb289; }
+.ultimate-board.won-white { background: #ddcba8; }
+.ultimate-cell { position: relative; display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; border-right: 1px solid rgba(60,30,10,0.28); border-bottom: 1px solid rgba(60,30,10,0.28); cursor: pointer; }
+.ultimate-cell:nth-child(3n) { border-right: none; }
+.ultimate-cell:nth-child(n+7) { border-bottom: none; }
+.ultimate-board.closed .ultimate-cell { cursor: default; }
+.ultimate-cell .mark { font-size: calc(var(--board-size) * 0.052); font-weight: 700; line-height: 1; pointer-events: none; }
+.ultimate-cell .mark.black { color: #1a1a1a; }
+.ultimate-cell .mark.white { color: #fff; text-shadow: 0 0 1px #333, 1px 0 0 #333, -1px 0 0 #333, 0 1px 0 #333, 0 -1px 0 #333, 1px 1px 0 #333, -1px -1px 0 #333, 1px -1px 0 #333, -1px 1px 0 #333; }
+.ultimate-cell.last-move { background: rgba(78,204,163,0.24); }
+.ultimate-board .board-winner { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: calc(var(--board-size) * 0.11); font-weight: 700; line-height: 1; pointer-events: none; opacity: 0.42; }
+.ultimate-board .board-winner.black { color: #1a1a1a; }
+.ultimate-board .board-winner.white { color: #fff; text-shadow: 0 0 2px #333, 0 0 4px rgba(0,0,0,0.5); }
+.ultimate-board.draw .board-winner { font-size: calc(var(--board-size) * 0.06); color: #8B7355; }
 /* 兼容旧直接类名（以防其他位置直接用 move-dot/capture-ring） */
 .xiangqi-cell .move-dot { position: absolute; width: 26%; height: 26%; border-radius: 50%; background: rgba(60,30,10,0.3); pointer-events: none; z-index: 2; left: 50%; top: 50%; transform: translate(-50%, -50%); }
 .xiangqi-cell .capture-ring { position: absolute; inset: 7%; border: min(0.5vmin,5px) solid rgba(233,69,96,0.6); border-radius: 50%; box-sizing: border-box; pointer-events: none; z-index: 2; }
@@ -466,6 +490,7 @@ body {
       <option value="gomoku">五子棋</option>
       <option value="chess">国际象棋</option>
       <option value="xiangqi">中国象棋</option>
+      <option value="ultimate">终极井字棋</option>
     </select>
   </div>
   <div class="rematch-hint" id="rematchHint"></div>
@@ -1314,6 +1339,72 @@ const Xiangqi = (function() {
   return { getLegalMoves, applyMove, isInCheck, hasAnyLegalMove, isCheckmate, isStalemate, initialBoard };
 })();
 
+// === 终极井字棋规则引擎（前端本地版，与 src/ultimate.js 同源） ===
+const Ultimate = (function() {
+  const LINES = [
+    [0, 1, 2], [3, 4, 5], [6, 7, 8],
+    [0, 3, 6], [1, 4, 7], [2, 5, 8],
+    [0, 4, 8], [2, 4, 6],
+  ];
+  /** 创建空棋盘（9 个小棋盘 × 9 格） */
+  function initialBoard() {
+    return Array.from({ length: 9 }, () => Array(9).fill(null));
+  }
+  /** 创建空的小棋盘结果数组 */
+  function initialWinners() {
+    return Array(9).fill(null);
+  }
+  /** 判断 9 个格子中是否有三子连线 */
+  function lineWinner(cells) {
+    for (const [a, b, c] of LINES) {
+      const v = cells[a];
+      if (v && v !== 'draw' && v === cells[b] && v === cells[c]) return v;
+    }
+    return null;
+  }
+  /** 小棋盘是否还能落子 */
+  function isPlayable(board, winners, b) {
+    if (!board || !board[b] || !winners || winners[b] !== null) return false;
+    return board[b].some((v) => v === null);
+  }
+  /** 生成合法落子（含“被送入已结束小棋盘则自由落子”规则） */
+  function getLegalMoves(board, winners, forcedBoard) {
+    const moves = [];
+    if (!board || !winners) return moves;
+    const restrict = forcedBoard !== null && forcedBoard !== undefined && isPlayable(board, winners, forcedBoard);
+    for (let b = 0; b < 9; b++) {
+      if (!isPlayable(board, winners, b)) continue;
+      if (restrict && b !== forcedBoard) continue;
+      for (let i = 0; i < 9; i++) {
+        if (board[b][i] === null) moves.push({ b: b, r: Math.floor(i / 3), c: i % 3 });
+      }
+    }
+    return moves;
+  }
+  /** 应用一步落子并结算小棋盘/大棋盘结果 */
+  function applyMove(board, winners, move, color) {
+    const newBoard = board.map((cells) => cells.slice());
+    const newWinners = winners.slice();
+    newBoard[move.b][move.r * 3 + move.c] = color;
+    let smallWinner = null;
+    if (newWinners[move.b] === null) {
+      smallWinner = lineWinner(newBoard[move.b]);
+      if (smallWinner) newWinners[move.b] = smallWinner;
+      else if (newBoard[move.b].every((v) => v !== null)) newWinners[move.b] = 'draw';
+    }
+    const bigWinner = lineWinner(newWinners);
+    const nextBoard = move.r * 3 + move.c;
+    const forcedBoard = isPlayable(newBoard, newWinners, nextBoard) ? nextBoard : null;
+    const draw = !bigWinner && getLegalMoves(newBoard, newWinners, forcedBoard).length === 0;
+    return { board: newBoard, winners: newWinners, smallWinner: smallWinner, bigWinner: bigWinner, draw: draw, forcedBoard: forcedBoard };
+  }
+  /** 返回对方颜色 */
+  function opposite(color) {
+    return color === 'black' ? 'white' : 'black';
+  }
+  return { initialBoard, initialWinners, lineWinner, isPlayable, getLegalMoves, applyMove, opposite };
+})();
+
 // === 全局变量定义 ===
 
 // 五子棋盘尺寸：15x15
@@ -1375,6 +1466,12 @@ let xiangqiLegalMoves = [];
 let xiangqiFlipped = false;
 // 缓存 90 个 cell DOM 引用，避免每次 render 全量重建
 let xiangqiCellRefs = null;
+// 终极井字棋棋盘数据（9 个小棋盘，每个 9 格）
+let ultimateBoardData = null;
+// 终极井字棋小棋盘结果：null / 'black' / 'white' / 'draw'
+let ultimateWinners = null;
+// 终极井字棋下一手必须落子的小棋盘索引（null 表示自由落子）
+let ultimateForcedBoard = null;
 // 上一步走法记录
 let lastMove = null;
 // 当前被将军的颜色
@@ -1461,7 +1558,7 @@ function init() {
     return;
   }
   const g = params.get('game');
-  gameType = (g === 'chess') ? 'chess' : (g === 'xiangqi') ? 'xiangqi' : 'gomoku';
+  gameType = (g === 'chess') ? 'chess' : (g === 'xiangqi') ? 'xiangqi' : (g === 'ultimate') ? 'ultimate' : 'gomoku';
   document.getElementById('roomId').textContent = roomId || '当面对战';
   if (localMode) {
     initLocalGame();
@@ -1498,6 +1595,11 @@ function initLocalGame() {
     xiangqiBoardData = Xiangqi.initialBoard();
     xiangqiState = null;
     currentTurn = 'red';
+  } else if (gameType === 'ultimate') {
+    ultimateBoardData = Ultimate.initialBoard();
+    ultimateWinners = Ultimate.initialWinners();
+    ultimateForcedBoard = null;
+    currentTurn = 'black';
   } else {
     boardData = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
     currentTurn = 'black';
@@ -1528,8 +1630,37 @@ function initLocalGame() {
   renderBoard();
   moveHistory.push(snapshotState());
   updateHeader();
-  setStatus('轮到 ' + colorLabel(currentTurn));
+  setStatus(turnStatusText());
   updateUndoButton();
+}
+
+/**
+ * 当前回合提示文案：终极井字棋额外提示必须落子的小棋盘。
+ * @returns {string}
+ */
+function turnStatusText() {
+  if (gameType === 'ultimate') {
+    if (ultimateForcedBoard !== null && ultimateForcedBoard !== undefined) {
+      return '轮到 ' + colorLabel(currentTurn) + '：请在第 ' + (Math.floor(ultimateForcedBoard / 3) + 1) + ' 行第 ' + (ultimateForcedBoard % 3 + 1) + ' 列的小棋盘落子';
+    }
+    return '轮到 ' + colorLabel(currentTurn) + '：可在任意未结束的小棋盘落子';
+  }
+  return '轮到 ' + colorLabel(currentTurn);
+}
+
+/**
+ * 在线模式回合提示文案（区分“轮到你了 / 等待对手”）。
+ * @returns {string}
+ */
+function onlineTurnStatus() {
+  if (!myColor || myColor !== currentTurn) return '等待对手落子...';
+  if (gameType === 'ultimate') {
+    if (ultimateForcedBoard !== null && ultimateForcedBoard !== undefined) {
+      return '轮到你了！请在第 ' + (Math.floor(ultimateForcedBoard / 3) + 1) + ' 行第 ' + (ultimateForcedBoard % 3 + 1) + ' 列的小棋盘落子';
+    }
+    return '轮到你了！可任意小棋盘落子';
+  }
+  return '轮到你了！';
 }
 
 /**
@@ -1683,6 +1814,38 @@ function applyLocalXiangqiMove(move) {
 }
 
 /**
+ * 本地终极井字棋走子：校验强制小棋盘约束、结算小棋盘/大棋盘、切换回合
+ * @param {{b:number,r:number,c:number}} move - 落子（b=小棋盘索引）
+ */
+function applyLocalUltimateMove(move) {
+  if (gameOver || !ultimateBoardData || !ultimateWinners) return;
+  const legalMoves = Ultimate.getLegalMoves(ultimateBoardData, ultimateWinners, ultimateForcedBoard);
+  const matched = legalMoves.find(function(m) {
+    return m.b === move.b && m.r === move.r && m.c === move.c;
+  });
+  if (!matched) return;
+  const mover = currentTurn;
+  const result = Ultimate.applyMove(ultimateBoardData, ultimateWinners, matched, mover);
+  ultimateBoardData = result.board;
+  ultimateWinners = result.winners;
+  ultimateForcedBoard = result.forcedBoard;
+  lastMove = { board: matched.b, to: { r: matched.r, c: matched.c } };
+  currentTurn = Ultimate.opposite(mover);
+  myColor = currentTurn;
+  renderUltimate();
+  moveHistory.push(snapshotState());
+  if (result.bigWinner) {
+    showLocalGameOver(mover, false);
+  } else if (result.draw) {
+    showLocalGameOver(null, true);
+  } else {
+    updateHeader();
+    setStatus(turnStatusText());
+  }
+  updateUndoButton();
+}
+
+/**
  * 显示本地模式游戏结束弹窗
  * @param {string|null} winner - 赢家颜色（null 表示和棋）
  * @param {boolean} isDraw - 是否和棋
@@ -1746,7 +1909,7 @@ function undoLocalMove() {
   renderBoard();
   updateHeader();
   if (checkColor) setStatus('将军！轮到 ' + colorLabel(currentTurn), true);
-  else setStatus('轮到 ' + colorLabel(currentTurn));
+  else setStatus(turnStatusText());
   updateUndoButton();
 }
 
@@ -1775,6 +1938,9 @@ function buildBoard() {
   } else if (gameType === 'xiangqi') {
     boardEl.className = 'board xiangqi';
     renderXiangqi();
+  } else if (gameType === 'ultimate') {
+    boardEl.className = 'board ultimate';
+    renderUltimate();
   } else {
     boardEl.className = 'board';
     buildGomokuBoard();
@@ -1808,7 +1974,80 @@ function buildGomokuBoard() {
 function renderBoard() {
   if (gameType === 'chess') renderChess();
   else if (gameType === 'xiangqi') renderXiangqi();
+  else if (gameType === 'ultimate') renderUltimate();
   else renderGomoku();
+}
+
+/**
+ * 渲染终极井字棋：3×3 大棋盘，每格嵌套 3×3 小棋盘。
+ * 高亮当前可落子的小棋盘，已结束的小棋盘显示占领标记。
+ */
+function renderUltimate() {
+  const boardEl = document.getElementById('board');
+  if (!boardEl) return;
+  boardEl.innerHTML = '';
+  const grid = document.createElement('div');
+  grid.className = 'ultimate-grid';
+  const legalMoves = Ultimate.getLegalMoves(ultimateBoardData, ultimateWinners, ultimateForcedBoard);
+  const playableBoards = new Set(legalMoves.map(function(m) { return m.b; }));
+
+  for (let b = 0; b < 9; b++) {
+    const small = document.createElement('div');
+    small.className = 'ultimate-board';
+    const winner = ultimateWinners ? ultimateWinners[b] : null;
+    if (winner) {
+      small.classList.add('closed');
+      if (winner === 'draw') small.classList.add('draw');
+      else small.classList.add('won-' + winner);
+    }
+    if (!winner && playableBoards.has(b)) small.classList.add('active');
+
+    for (let i = 0; i < 9; i++) {
+      const r = Math.floor(i / 3), c = i % 3;
+      const cell = document.createElement('div');
+      cell.className = 'ultimate-cell';
+      const value = (ultimateBoardData && ultimateBoardData[b]) ? ultimateBoardData[b][i] : null;
+      if (value) {
+        const mark = document.createElement('span');
+        mark.className = 'mark ' + value;
+        mark.textContent = value === 'black' ? '✕' : '○';
+        cell.appendChild(mark);
+      }
+      if (lastMove && lastMove.board === b && lastMove.to && lastMove.to.r === r && lastMove.to.c === c) {
+        cell.classList.add('last-move');
+      }
+      cell.addEventListener('click', function() { onUltimateCellClick(b, r, c); });
+      small.appendChild(cell);
+    }
+
+    if (winner) {
+      const overlay = document.createElement('div');
+      overlay.className = 'board-winner ' + (winner === 'draw' ? 'draw' : winner);
+      overlay.textContent = winner === 'draw' ? '—' : (winner === 'black' ? '✕' : '○');
+      small.appendChild(overlay);
+    }
+    grid.appendChild(small);
+  }
+  boardEl.appendChild(grid);
+}
+
+/**
+ * 终极井字棋格子点击：本地模式应用规则，在线模式发送 WebSocket
+ * @param {number} b - 小棋盘索引
+ * @param {number} r - 小棋盘内行
+ * @param {number} c - 小棋盘内列
+ */
+function onUltimateCellClick(b, r, c) {
+  if (gameOver || !myColor || myColor !== currentTurn) return;
+  const move = { b: b, r: r, c: c };
+  if (localMode) {
+    applyLocalUltimateMove(move);
+    return;
+  }
+  if (!ws || ws.readyState !== 1) return;
+  const legalMoves = Ultimate.getLegalMoves(ultimateBoardData, ultimateWinners, ultimateForcedBoard);
+  if (!legalMoves.some(function(m) { return m.b === b && m.r === r && m.c === c; })) return;
+  ws.send(JSON.stringify({ type: 'move', b: b, r: r, c: c }));
 }
 
 /**
@@ -2412,12 +2651,15 @@ function snapshotState() {
   let board;
   if (gameType === 'chess') board = chessBoardData;
   else if (gameType === 'xiangqi') board = xiangqiBoardData;
+  else if (gameType === 'ultimate') board = ultimateBoardData;
   else board = boardData;
   return {
     gameType,
     board: board ? JSON.parse(JSON.stringify(board)) : null,
     chessState: chessState ? JSON.parse(JSON.stringify(chessState)) : null,
     xiangqiState: xiangqiState ? JSON.parse(JSON.stringify(xiangqiState)) : null,
+    ultimateWinners: ultimateWinners ? JSON.parse(JSON.stringify(ultimateWinners)) : null,
+    ultimateForcedBoard: ultimateForcedBoard === undefined ? null : ultimateForcedBoard,
     lastMove: lastMove ? JSON.parse(JSON.stringify(lastMove)) : null,
     checkColor,
     currentTurn,
@@ -2425,28 +2667,32 @@ function snapshotState() {
 }
 
 /**
- * 浅比较两个棋盘是否相同（用于终局 sync 去重）
- * @param {Array} a - 棋盘 A
- * @param {Array} b - 棋盘 B
+ * 深度比较两个棋盘是否相同（用于终局 sync 去重）。
+ * 支持五子棋/象棋的二维数组与终极井字棋的三维数组。
+ * @param {*} a - 棋盘 A
+ * @param {*} b - 棋盘 B
  * @returns {boolean} 是否相同
  */
 function boardsEqual(a, b) {
-  if (!a || !b) return a === b;
-  if (a.length !== b.length) return false;
-  for (let r = 0; r < a.length; r++) {
-    const ar = a[r], br = b[r];
-    if (!ar || !br || ar.length !== br.length) return false;
-    for (let c = 0; c < ar.length; c++) {
-      const av = ar[c], bv = br[c];
-      if (typeof av === 'object' && typeof bv === 'object') {
-        if (!av || !bv) return av === bv;
-        if (av.color !== bv.color || av.type !== bv.type) return false;
-      } else if (av !== bv) {
-        return false;
-      }
+  if (a === b) return true;
+  if (a === null || b === null || a === undefined || b === undefined) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!boardsEqual(a[i], b[i])) return false;
     }
+    return true;
   }
-  return true;
+  if (typeof a === 'object' || typeof b === 'object') {
+    if (!a || !b) return false;
+    const ak = Object.keys(a), bk = Object.keys(b);
+    if (ak.length !== bk.length) return false;
+    for (const k of ak) {
+      if (!boardsEqual(a[k], b[k])) return false;
+    }
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -2546,6 +2792,10 @@ function restoreFromSnapshot(snap) {
   } else if (snap.gameType === 'xiangqi') {
     xiangqiBoardData = snap.board ? JSON.parse(JSON.stringify(snap.board)) : null;
     xiangqiState = snap.xiangqiState ? JSON.parse(JSON.stringify(snap.xiangqiState)) : null;
+  } else if (snap.gameType === 'ultimate') {
+    ultimateBoardData = snap.board ? JSON.parse(JSON.stringify(snap.board)) : null;
+    ultimateWinners = snap.ultimateWinners ? JSON.parse(JSON.stringify(snap.ultimateWinners)) : null;
+    ultimateForcedBoard = snap.ultimateForcedBoard === undefined ? null : snap.ultimateForcedBoard;
   } else {
     boardData = snap.board ? JSON.parse(JSON.stringify(snap.board)) : null;
   }
@@ -2647,6 +2897,8 @@ function exportReviewHTML() {
     lastMove: s.lastMove,
     checkColor: s.checkColor || null,
     currentTurn: s.currentTurn,
+    ultimateWinners: s.ultimateWinners || null,
+    forcedBoard: s.ultimateForcedBoard === undefined ? null : s.ultimateForcedBoard,
   }));
   // 若处于模拟重下模式，附加当前模拟状态作为最后一步
   if (simMode && simMoves.length > 0) {
@@ -2663,7 +2915,7 @@ function exportReviewHTML() {
       currentTurn: simColor,
     });
   }
-  const gameLabel = snaps[0].gameType === 'chess' ? '国际象棋' : (snaps[0].gameType === 'xiangqi' ? '中国象棋' : '五子棋');
+  const gameLabel = snaps[0].gameType === 'chess' ? '国际象棋' : (snaps[0].gameType === 'xiangqi' ? '中国象棋' : (snaps[0].gameType === 'ultimate' ? '终极井字棋' : '五子棋'));
   const data = JSON.stringify(snaps);
   const html = buildExportHTML(snaps, gameLabel, data);
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
@@ -2760,7 +3012,21 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
     '.controls .sim-hint { font-size: 12px; color: #4ecca3; font-weight: 600; }',
     '.controls .sim-hint.hidden { display: none; }',
     '.board-wrap.sim-active { box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 3px #4ecca3; }',
-    '.cell.sim-cell { cursor: pointer; }'
+    '.cell.sim-cell { cursor: pointer; }',
+    '.board-wrap.ultimate { background: transparent; padding: 0; }',
+    '.u-grid { width: 100%; height: 100%; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: 6px; }',
+    '.u-board { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); background: #f0d9b5; border-radius: 6px; overflow: hidden; }',
+    '.u-board.active { box-shadow: 0 0 0 2px #4ecca3; }',
+    '.u-board.closed { opacity: 0.6; }',
+    '.u-cell { display: flex; align-items: center; justify-content: center; border-right: 1px solid rgba(60,30,10,0.28); border-bottom: 1px solid rgba(60,30,10,0.28); font-size: 5vmin; font-weight: 700; }',
+    '.u-cell:nth-child(3n) { border-right: none; }',
+    '.u-cell:nth-child(n+7) { border-bottom: none; }',
+    '.u-cell .mark.black { color: #1a1a1a; }',
+    '.u-cell .mark.white { color: #fff; text-shadow: 0 0 1px #333, 1px 0 0 #333, -1px 0 0 #333, 0 1px 0 #333, 0 -1px 0 #333; }',
+    '.u-cell.last-move { background: rgba(78,204,163,0.24); }',
+    '.u-winner { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11vmin; font-weight: 700; opacity: 0.42; pointer-events: none; }',
+    '.u-winner.black { color: #1a1a1a; }',
+    '.u-winner.white { color: #fff; text-shadow: 0 0 2px #333; }'
   ].join(N);
   var js = [
     'var simMode = false;',
@@ -2806,8 +3072,50 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
     '  simColor = simColor === "black" ? "white" : "black";',
     '  render();',
     '}',
+    'function renderUltimate(s) {',
+    '  var boardData = curBoard();',
+    '  var lastMove = curLastMove();',
+    '  var winners = s.ultimateWinners || [];',
+    '  var forced = s.forcedBoard;',
+    '  var boardEl = document.getElementById("board");',
+    '  boardEl.className = "board-wrap ultimate";',
+    '  boardEl.innerHTML = "";',
+    '  var grid = document.createElement("div");',
+    '  grid.className = "u-grid";',
+    '  for (var b = 0; b < 9; b++) {',
+    '    var sm = document.createElement("div");',
+    '    sm.className = "u-board";',
+    '    var w = winners[b] || null;',
+    '    var open = !w && boardData && boardData[b] && boardData[b].indexOf(null) !== -1;',
+    '    if (w) sm.classList.add("closed");',
+    '    if (open && (forced === null || forced === undefined || forced === b)) sm.classList.add("active");',
+    '    for (var i = 0; i < 9; i++) {',
+    '      var r = Math.floor(i / 3), c = i % 3;',
+    '      var cell = document.createElement("div");',
+    '      cell.className = "u-cell";',
+    '      var v = boardData && boardData[b] ? boardData[b][i] : null;',
+    '      if (v) {',
+    '        var mk = document.createElement("span");',
+    '        mk.className = "mark " + v;',
+    '        mk.textContent = v === "black" ? "✕" : "○";',
+    '        cell.appendChild(mk);',
+    '      }',
+    '      if (lastMove && lastMove.board === b && lastMove.to && lastMove.to.r === r && lastMove.to.c === c) cell.classList.add("last-move");',
+    '      sm.appendChild(cell);',
+    '    }',
+    '    if (w) {',
+    '      var ov = document.createElement("div");',
+    '      ov.className = "u-winner " + w;',
+    '      ov.textContent = w === "draw" ? "—" : (w === "black" ? "✕" : "○");',
+    '      sm.appendChild(ov);',
+    '    }',
+    '    grid.appendChild(sm);',
+    '  }',
+    '  boardEl.appendChild(grid);',
+    '}',
     'function render() {',
     '  var s = SNAPS[idx];',
+    '  if (s.gameType === "ultimate") { renderUltimate(s); } else {',
     '  var boardData = curBoard();',
     '  var lastMove = curLastMove();',
     '  var boardEl = document.getElementById("board");',
@@ -2868,6 +3176,7 @@ function buildExportHTML(snaps, gameLabel, dataJson) {
     '    onCellClick(+node.dataset.row, +node.dataset.col);',
     '  });',
     '  boardEl.appendChild(grid);',
+    '  }',
     '  var shown = simMode ? (idx + simMoves.length) : idx;',
     '  var shownTotal = simMode ? (SNAPS.length - 1 + simMoves.length) : Math.max(0, SNAPS.length - 1);',
     '  document.getElementById("stepEl").textContent = shown + " / " + shownTotal;',
@@ -3062,6 +3371,9 @@ function connect() {
         xiangqiSelected = null;
         xiangqiLegalMoves = [];
         xiangqiState = null;
+        ultimateBoardData = null;
+        ultimateWinners = null;
+        ultimateForcedBoard = null;
         checkColor = null;
         rematchRole = null;
         gameOver = false;
@@ -3100,6 +3412,11 @@ function connect() {
           xiangqiState = msg.xiangqiState || null;
           xiangqiSelected = null;
           xiangqiLegalMoves = [];
+        } else if (gameType === 'ultimate') {
+          ultimateBoardData = msg.board;
+          ultimateWinners = msg.winners || null;
+          ultimateForcedBoard = (msg.forcedBoard === undefined) ? null : msg.forcedBoard;
+          lastMove = msg.lastMove || null;
         } else {
           boardData = msg.board;
           lastMove = msg.lastMove || null;
@@ -3120,7 +3437,7 @@ function connect() {
         renderBoard();
         updateHeader();
         if (!gameOver && myColor) {
-          setStatus(myColor === currentTurn ? '轮到你了！' : '等待对手落子...');
+          setStatus(onlineTurnStatus());
         }
         // 新一局开始时恢复求和按钮
         var drawBtnSync = document.getElementById('drawBtn');
@@ -3156,6 +3473,17 @@ function connect() {
             // 本地应用失败，以服务端状态为准
           }
           if (msg.xiangqiState) xiangqiState = msg.xiangqiState;
+        } else if (gameType === 'ultimate') {
+          try {
+            const result = Ultimate.applyMove(ultimateBoardData, ultimateWinners, msg.move, msg.color);
+            ultimateBoardData = result.board;
+            ultimateWinners = result.winners;
+            ultimateForcedBoard = result.forcedBoard;
+          } catch (e) {
+            // 本地应用失败，以服务端下发的 winners/forcedBoard 为准
+          }
+          if (Array.isArray(msg.winners)) ultimateWinners = msg.winners;
+          if (msg.forcedBoard !== undefined) ultimateForcedBoard = msg.forcedBoard;
         }
         lastMove = msg.lastMove || null;
         currentTurn = msg.currentTurn;
@@ -3177,7 +3505,7 @@ function connect() {
         renderBoard();
         updateHeader();
         if (!gameOver && myColor) {
-          setStatus(myColor === currentTurn ? '轮到你了！' : '等待对手落子...');
+          setStatus(onlineTurnStatus());
         }
         break;
       }
@@ -3219,7 +3547,7 @@ function connect() {
         // 对方请求再来一局，弹窗显示对方选择的棋种，我方只点同意/拒绝
         rematchRole = 'accepter';
         document.getElementById('rematchWaiting').classList.add('hidden');
-        const gameName = msg.gameType === 'chess' ? '国际象棋' : (msg.gameType === 'xiangqi' ? '中国象棋' : '五子棋');
+        const gameName = msg.gameType === 'chess' ? '国际象棋' : (msg.gameType === 'xiangqi' ? '中国象棋' : (msg.gameType === 'ultimate' ? '终极井字棋' : '五子棋'));
         const rematchText = '对方申请再下一盘' + gameName;
         // 复盘模式下用顶部弹窗提醒，避免全屏遮罩打断复盘；其他场景沿用全屏弹窗
         if (replaying) {
